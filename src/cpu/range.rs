@@ -1,17 +1,11 @@
-pub struct Range {
-	start: u32,
-	end: u32
-}
+pub struct Range (pub u32, pub u32);
 
 impl Range {
-	pub fn new(start: u32, end: u32) -> Range {
-		Range {
-			start: start,
-			end: end
-		}
+	pub fn offset(&self, address: u32) -> u32 {
+		address - self.0
 	}
 
 	pub fn between(&self, address: u32) -> bool {
-		(self.start <= address) & (address < self.end)
+		(self.0 <= address) & (address < self.1)
 	}
 }
