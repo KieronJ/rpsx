@@ -1,0 +1,6 @@
+bios/
+target/
+
+*.bk
+Cargo.lock
+.exe.bin
