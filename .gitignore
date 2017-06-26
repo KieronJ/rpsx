@@ -3,4 +3,4 @@ target/
 
 *.bk
 Cargo.lock
-.exe.bin
+.exe.bin.bat

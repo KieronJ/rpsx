@@ -46,24 +46,34 @@ impl CPU {
 
 		match instruction.opcode() {
 			0b000000 => self.op_special(instruction),
+			0b000010 => self.op_j(instruction),
 			0b001001 => self.op_addiu(instruction),
 			0b001101 => self.op_ori(instruction),
 			0b001111 => self.op_lui(instruction),
 			0b101011 => self.op_sw(instruction),
-			_ => { println!("unrecognised instruction {:#08x}", instruction.as_bytes()); 
-				   panic!("unrecognised instruction") }
+			_ => { println!("unrecognised instruction {:#08x}", instruction.as_bytes()); panic!("unrecognised instruction") }
 		}
 
 		//println!("{:?}\n", self.regs);
 
-		self.pc += 4;
+		if !self.branch_delay_enabled || self.branch_delay_slot {
+			self.branch_delay_slot = false;
+			self.pc += 4
+		}
+
+		if self.branch_delay_enabled && !self.branch_delay_slot {
+			self.pc = self.branch_delay_pc;
+			self.branch_delay_enabled = false;
+			self.branch_delay_slot = false;
+		}
+
 	}
 
 	fn op_special(&mut self, instruction: Instruction) {
 		match instruction.function() {
 			0b000000 => self.op_sll(instruction),
-			_ => { println!("unrecognised instruction {:#08x}", instruction.as_bytes()); 
-				   panic!("unrecognised instruction") }		
+			0b100101 => self.op_or(instruction),
+			_ => { println!("unrecognised instruction {:#08x}", instruction.as_bytes()); panic!("unrecognised instruction") }		
 		}
 	}
 
@@ -76,6 +86,29 @@ impl CPU {
 
 		let v = self.reg(rt as usize) << shift;
 		self.set_reg(rd as usize, v);
+	}
+
+	fn op_or(&mut self, instruction: Instruction) {
+		let rd = instruction.rd();
+		let rt = instruction.rt();
+		let rs = instruction.rs();
+
+		println!("OR ${}, ${}, ${}", rd, rs, rt);
+
+		let v = self.reg(rs as usize) | self.reg(rt as usize);
+
+		self.set_reg(rd as usize, v);	
+	}
+
+	fn op_j(&mut self, instruction: Instruction) {
+		let target = instruction.target();
+		let jump_address = (self.pc & 0xf000_0000) | (target << 2);
+
+		println!("J {:#08x}", jump_address);
+
+		self.branch_delay_enabled = true;
+		self.branch_delay_slot = true;
+		self.branch_delay_pc = jump_address;
 	}
 
 	fn op_addiu(&mut self, instruction: Instruction) {
