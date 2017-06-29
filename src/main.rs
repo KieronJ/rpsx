@@ -1,6 +1,7 @@
 extern crate byteorder;
 
 mod cpu;
+mod util;
 
 use std::env;
 use std::fs::File;

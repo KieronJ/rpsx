@@ -1,6 +1,4 @@
 bios/
 target/
 
-*.bk
-Cargo.lock
-.exe.bin.bat
+*.bkCargo.lock.exe.bin.bat

@@ -1,8 +1,8 @@
-use super::{Instruction, Interconnect};
+use super::{Cop0, Instruction, Interconnect};
 
 pub struct CPU {
 	regs: [u32; 32],
-	regs_load_delay: [u32; 32],
+	load_delay_regs: [u32; 32],
 
 	pc: u32,
 
@@ -13,7 +13,10 @@ pub struct CPU {
 	branch_delay_slot: bool,
 	branch_delay_pc: u32,
 
-	load_delay: bool,
+	load_delay_enabled: bool,
+	load_delay_slot: bool,
+
+	cop0: Cop0,
 
 	interconnect: Interconnect
 }
@@ -22,7 +25,7 @@ impl CPU {
 	pub fn new(bios: Box<[u8]>) -> CPU {
 		CPU {
 			regs: [0; 32],
-			regs_load_delay: [0; 32],
+			load_delay_regs: [0; 32],
 
 			pc: 0xbfc0_0000,
 
@@ -33,7 +36,10 @@ impl CPU {
 			branch_delay_slot: false,
 			branch_delay_pc: 0,
 
-			load_delay: false,
+			load_delay_enabled: false,
+			load_delay_slot: false,
+
+			cop0: Cop0::new(),
 
 			interconnect: Interconnect::new(bios)
 		}
@@ -54,17 +60,19 @@ impl CPU {
 			_ => { println!("unrecognised instruction {:#08x}", instruction.as_bytes()); panic!("unrecognised instruction") }
 		}
 
-		//println!("{:?}\n", self.regs);
-
-		if !self.branch_delay_enabled || self.branch_delay_slot {
-			self.branch_delay_slot = false;
-			self.pc += 4
-		}
-
 		if self.branch_delay_enabled && !self.branch_delay_slot {
 			self.pc = self.branch_delay_pc;
 			self.branch_delay_enabled = false;
+		} else {
+			self.pc += 4;
 			self.branch_delay_slot = false;
+		}
+
+		if self.load_delay_enabled && self.load_delay_slot {
+			self.load_delay_slot = false;
+		} else {
+			self.regs.copy_from_slice(&self.load_delay_regs);
+			self.load_delay_enabled = false;
 		}
 
 	}
@@ -84,8 +92,8 @@ impl CPU {
 
 		println!("SLL ${}, ${}, {}", rd, rt, shift);
 
-		let v = self.reg(rt as usize) << shift;
-		self.set_reg(rd as usize, v);
+		let v = self.reg(rt) << shift;
+		self.set_reg(rd, v);
 	}
 
 	fn op_or(&mut self, instruction: Instruction) {
@@ -95,9 +103,9 @@ impl CPU {
 
 		println!("OR ${}, ${}, ${}", rd, rs, rt);
 
-		let v = self.reg(rs as usize) | self.reg(rt as usize);
+		let v = self.reg(rs) | self.reg(rt);
 
-		self.set_reg(rd as usize, v);	
+		self.set_reg(rd, v);	
 	}
 
 	fn op_j(&mut self, instruction: Instruction) {
@@ -118,8 +126,8 @@ impl CPU {
 
 		println!("ADDIU ${}, ${}, {:#04x}", rt, rs, imm);
 
-		let v = self.reg(rs as usize).wrapping_add(imm);
-		self.set_reg(rt as usize, v);
+		let v = self.reg(rs).wrapping_add(imm);
+		self.set_reg(rt, v);
 
 	}
 
@@ -130,8 +138,8 @@ impl CPU {
 
 		println!("ORI ${}, ${}, {:#04x}", rt, rs, imm);
 
-		let v = self.reg(rs as usize) | imm;
-		self.set_reg(rt as usize, v);
+		let v = self.reg(rs) | imm;
+		self.set_reg(rt, v);
 	}
 
 	fn op_lui(&mut self, instruction: Instruction) {
@@ -141,7 +149,7 @@ impl CPU {
 		println!("LUI ${}, {:#04x}", rt, imm);
 
 		let v = imm << 16;
-		self.set_reg(rt as usize, v);
+		self.set_reg(rt, v);
 	}
 
 	fn op_sw(&mut self, instruction: Instruction) {
@@ -151,14 +159,30 @@ impl CPU {
 
 		println!("SW ${}, {:#04x}(${})", rt, offset, rs);
 
-		let addr = self.reg(rs as usize).wrapping_add(offset);
-		let v = self.reg(rt as usize);
+		let addr = self.reg(rs).wrapping_add(offset);
+		let v = self.reg(rt);
 		self.store32(addr, v);
 	}
+
+	// fn load8(&self, address: u32) -> u8 {
+	// 	(self.interconnect.load8(address) as i8) as u32
+	// }
+
+	// fn load16(&self, address: u32) -> u16 {
+	// 	(self.interconnect.load16(address) as i16) as u32
+	// }
 
 	fn load32(&self, address: u32) -> u32 {
 		self.interconnect.load32(address)
 	}
+
+	// fn store8(&mut self, address: u32, data: u8) {
+	// 	self.interconnect.store8(address, data);
+	// }
+
+	// fn store16(&mut self, address: u32, data: u16) {
+	// 	self.interconnect.store16(address, data);
+	// }
 
 	fn store32(&mut self, address: u32, data: u32) {
 		self.interconnect.store32(address, data);
@@ -168,9 +192,9 @@ impl CPU {
 		self.regs[index]
 	}
 
-	fn set_reg(&mut self, index: usize, value: u32) {
-		self.regs[index] = value;
-		self.regs[0] = 0;
+	fn set_reg(&mut self, index: usize, data: u32) {
+		self.load_delay_regs[index] = data;
+		self.load_delay_regs[0] = 0;
 	}
 
 }

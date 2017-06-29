@@ -3,9 +3,9 @@ pub struct Instruction {
 }
 
 impl Instruction {
-	pub fn new(data: u32) -> Instruction {
+	pub fn new(instruction: u32) -> Instruction {
 		Instruction {
-			instruction: data
+			instruction: instruction
 		}
 	}
 
@@ -17,16 +17,16 @@ impl Instruction {
 		(self.instruction >> 26) & 0x3f
 	}
 
-	pub fn rs(&self) -> u32 {
-		(self.instruction >> 21) & 0x1f
+	pub fn rs(&self) -> usize {
+		((self.instruction >> 21) & 0x1f) as usize
 	}
 
-	pub fn rt(&self) -> u32 {
-		(self.instruction >> 16) & 0x1f
+	pub fn rt(&self) -> usize {
+		((self.instruction >> 16) & 0x1f) as usize
 	}
 
-	pub fn rd(&self) -> u32 {
-		(self.instruction >> 11) & 0x1f
+	pub fn rd(&self) -> usize {
+		((self.instruction >> 11) & 0x1f) as usize
 	}
 
 	pub fn shift(&self) -> u32 {

@@ -1,4 +1,4 @@
-use super::Range;
+use util::Range;
 use byteorder::{LittleEndian, ByteOrder};
 
 pub const BIOS_RANGE: Range = Range(0xbfc00000, 0xbfc80000);
@@ -21,7 +21,6 @@ impl Interconnect {
 		if address % 4 != 0 {
 			panic!("unaligned load32 from address {:#x}", address)
 		}
-
 
 		match address {
 			address if BIOS_RANGE.between(address) => LittleEndian::read_u32(&self.bios[(BIOS_RANGE.offset(address)) as usize..]),
