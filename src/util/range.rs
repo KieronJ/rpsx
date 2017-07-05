@@ -1,8 +1,8 @@
 pub struct Range (pub u32, pub u32);
 
 impl Range {
-	pub fn offset(&self, address: u32) -> u32 {
-		address - self.0
+	pub fn offset(&self, address: u32) -> usize {
+		(address - self.0) as usize
 	}
 
 	pub fn between(&self, address: u32) -> bool {

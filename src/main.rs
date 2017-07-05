@@ -13,7 +13,8 @@ fn main() {
 	let bios_filepath = env::args().nth(1).unwrap();
 	let bios = read_file(bios_filepath);
 
-	let mut cpu = CPU::new(bios);
+	let mut cpu = CPU::default();
+	cpu.reset(bios);
 
 	loop {
 		cpu.run();
