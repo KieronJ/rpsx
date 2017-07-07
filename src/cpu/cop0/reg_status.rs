@@ -15,21 +15,20 @@ pub struct Status {
 
 impl Status {
 	pub fn get_value(&self) -> u32 {
-		let mut value = 0u32;
-		value  = (self.coprocessor_enable[0]  as u32) << 31;
-		value |= (self.coprocessor_enable[1]  as u32) << 30;
-		value |= (self.coprocessor_enable[2]  as u32) << 29;
-		value |= (self.coprocessor_enable[3]  as u32) << 28;
-		value |= (self.reverse_endianness     as u32) << 25;
-		value |= (self.boot_exception_vector  as u32) << 22;
-		value |= (self.tlb_shutdown           as u32) << 21;
-		value |= (self.cache_parity_error     as u32) << 20;
-		value |= (self.last_load_result       as u32) << 19;
-		value |= (self.cache_parity_zero      as u32) << 18;
-		value |= (self.swapped_cache          as u32) << 17;
-		value |= (self.isolate_cache          as u32) << 16;
-		value |= (self.interrupt_mask         as u32) <<  8;
-		value |  (self.interrupt_enable_kernel_user_mode.get_value() as u32)
+		let mut value  = (self.coprocessor_enable[0]  as u32) << 31;
+				value |= (self.coprocessor_enable[1]  as u32) << 30;
+				value |= (self.coprocessor_enable[2]  as u32) << 29;
+				value |= (self.coprocessor_enable[3]  as u32) << 28;
+				value |= (self.reverse_endianness     as u32) << 25;
+				value |= (self.boot_exception_vector  as u32) << 22;
+				value |= (self.tlb_shutdown           as u32) << 21;
+				value |= (self.cache_parity_error     as u32) << 20;
+				value |= (self.last_load_result       as u32) << 19;
+				value |= (self.cache_parity_zero      as u32) << 18;
+				value |= (self.swapped_cache          as u32) << 17;
+				value |= (self.isolate_cache          as u32) << 16;
+				value |= (self.interrupt_mask         as u32) <<  8;
+				value |  (self.interrupt_enable_kernel_user_mode.get_value() as u32)
 	}
 
 	pub fn set_value(&mut self, data: u32) {
