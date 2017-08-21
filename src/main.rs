@@ -14,14 +14,14 @@ fn main() {
 	let bios = read_file(bios_filepath);
 
 	let mut cpu = CPU::default();
-	cpu.reset(bios);
+	cpu.init(bios);
 
 	loop {
 		cpu.run();
 	}
 }
 
-pub fn read_file<P: AsRef<Path>>(path: P) -> Box<[u8]> {
+fn read_file<P: AsRef<Path>>(path: P) -> Box<[u8]> {
 	let mut file = File::open(path).unwrap();
 	let mut file_buffer = Vec::new();
 	file.read_to_end(&mut file_buffer).unwrap();

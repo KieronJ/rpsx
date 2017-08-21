@@ -23,7 +23,7 @@ pub struct Interconnect {
 }
 
 impl Interconnect {
-	pub fn reset(&mut self, bios: Box<[u8]>) {
+	pub fn init(&mut self, bios: Box<[u8]>) {
 		self.bios = bios;
 		self.ram = vec![0; 0x200000].into_boxed_slice()
 	}
@@ -32,12 +32,8 @@ impl Interconnect {
 		address & REGION_MASK[(address >> 29) as usize]
 	}
 
-	pub fn load8(&self, cache_isolated: bool, virtual_address: u32) -> u8 {
+	pub fn load8(&self, virtual_address: u32) -> u8 {
 		let physical_address = self.translate_address(virtual_address);
-
-		if cache_isolated {
-			return 0
-		}
 
 		match physical_address {
 			address if RAM_RANGE.between(address) => self.ram[RAM_RANGE.offset(address)],
@@ -53,15 +49,11 @@ impl Interconnect {
 		}
 	}
 
-	pub fn load32(&self, cache_isolated: bool, virtual_address: u32) -> u32 {
+	pub fn load32(&self, virtual_address: u32) -> u32 {
 		let physical_address = self.translate_address(virtual_address);
 
 		if physical_address % 4 != 0 {
 			panic!("unaligned load32 from address 0x{:08x}", physical_address)
-		}
-
-		if cache_isolated {
-			return 0
 		}
 
 		match physical_address {
@@ -78,12 +70,8 @@ impl Interconnect {
 		}
 	}
 
-	pub fn store8(&mut self, cache_isolated: bool, virtual_address: u32, data: u8) {
+	pub fn store8(&mut self, virtual_address: u32, data: u8) {
 		let physical_address = self.translate_address(virtual_address);
-
-		if cache_isolated {
-			return
-		}
 
 		match physical_address {
 			address if RAM_RANGE.between(address) => self.ram[RAM_RANGE.offset(address)] = data,
@@ -99,19 +87,15 @@ impl Interconnect {
 		}
 	}
 
-	pub fn store16(&mut self, cache_isolated: bool, virtual_address: u32, data: u16) {
+	pub fn store16(&mut self, virtual_address: u32, data: u16) {
 		let physical_address = self.translate_address(virtual_address);
 
 		if physical_address % 2 != 0 {
 			panic!("unaligned store16 to address 0x{:08x}", physical_address)
 		}
 
-		if cache_isolated {
-			return
-		}
-
 		match physical_address {
-			address if RAM_RANGE.between(address) => LittleEndian::write_u16(&mut self.ram[(RAM_RANGE.offset(address)) as usize..], data),
+			address if RAM_RANGE.between(address) => LittleEndian::write_u16(&mut self.ram[(RAM_RANGE.offset(address))..], data),
 			address if BIOS_RANGE.between(address) => panic!("store16 to BIOS range {:#08x}"),
 			address if MEM_CONTROL_RANGE.between(address) => println!("store16 to unimplemented MEM_CONTROL register 0x{:08x}", address),
 			address if RAM_SIZE_RANGE.between(address) => println!("store16 to unimplemented RAM_SIZE register 0x{:08x}", address),
@@ -124,19 +108,15 @@ impl Interconnect {
 		}
 	}
 
-	pub fn store32(&mut self, cache_isolated: bool, virtual_address: u32, data: u32) {
+	pub fn store32(&mut self, virtual_address: u32, data: u32) {
 		let physical_address = self.translate_address(virtual_address);
 
 		if physical_address % 4 != 0 {
 			panic!("unaligned store32 to address 0x{:08x}", physical_address)
 		}
 
-		if cache_isolated {
-			return
-		}
-
 		match physical_address {
-			address if RAM_RANGE.between(address) => LittleEndian::write_u32(&mut self.ram[(RAM_RANGE.offset(address)) as usize..], data),
+			address if RAM_RANGE.between(address) => LittleEndian::write_u32(&mut self.ram[(RAM_RANGE.offset(address))..], data),
 			address if BIOS_RANGE.between(address) => panic!("store32 to BIOS range {:#08x}"),
 			address if MEM_CONTROL_RANGE.between(address) => println!("store32 to unimplemented MEM_CONTROL register 0x{:08x}", address),
 			address if RAM_SIZE_RANGE.between(address) => println!("store32 to unimplemented RAM_SIZE register 0x{:08x}", address),

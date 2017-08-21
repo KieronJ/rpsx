@@ -14,6 +14,12 @@ pub struct Status {
 }
 
 impl Status {
+	pub fn reset(&mut self) {
+		self.boot_exception_vector = true;
+		self.tlb_shutdown = true;
+		self.interrupt_enable_kernel_user_mode.reset();
+	}
+
 	pub fn get_value(&self) -> u32 {
 		let mut value  = (self.coprocessor_enable[0]  as u32) << 31;
 				value |= (self.coprocessor_enable[1]  as u32) << 30;
@@ -64,6 +70,11 @@ struct InterruptEnableKernelUserMode {
 }
 
 impl InterruptEnableKernelUserMode {
+	pub fn reset(&mut self) {
+		self.curr_kernel_user_mode = false;
+		self.curr_interrupt_enable = false;
+	}
+
 	pub fn get_value(&self) -> u8 {
 		let mut value = 0u8;
 		value |= (self.old_kernel_user_mode  as u8) << 5;

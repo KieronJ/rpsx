@@ -22,15 +22,20 @@ pub struct CPU {
 }
 
 impl CPU {
-	pub fn reset(&mut self, bios: Box<[u8]>) {
+	pub fn init(&mut self, bios: Box<[u8]>) {
+		self.reset();
+		self.interconnect.init(bios);
+	}
+
+	pub fn reset(&mut self) {
+		self.cop0.reset(self.pc);
 		self.pc = 0xbfc00000;
-		self.interconnect.reset(bios);
 	}
 
 	pub fn run(&mut self) {
 		print!("0x{:08x}: ", self.pc);
 
-		let instruction = Instruction::new(self.interconnect.load32(false, self.pc));
+		let instruction = Instruction::new(self.interconnect.load32(self.pc));
 
 		match instruction.opcode() {
 			0b000000 => self.op_special(instruction),
@@ -44,6 +49,7 @@ impl CPU {
 			0b001000 => self.op_addi(instruction),
 			0b001001 => self.op_addiu(instruction),
 			0b001010 => self.op_slti(instruction),
+			0b001011 => self.op_sltiu(instruction),
 			0b001100 => self.op_andi(instruction),
 			0b001101 => self.op_ori(instruction),
 			0b001111 => self.op_lui(instruction),
@@ -70,12 +76,12 @@ impl CPU {
 		} else {
 			self.regs.copy_from_slice(&self.load_delay_regs);
 		}
-
 	}
 
 	fn op_special(&mut self, instruction: Instruction) {
 		match instruction.function() {
 			0b000000 => self.op_sll(instruction),
+			0b000010 => self.op_srl(instruction),
 			0b000011 => self.op_sra(instruction),
 			0b001000 => self.op_jr(instruction),
 			0b001001 => self.op_jalr(instruction),
@@ -84,6 +90,7 @@ impl CPU {
 			0b100011 => self.op_subu(instruction),
 			0b100100 => self.op_and(instruction),
 			0b100101 => self.op_or(instruction),
+			0b101010 => self.op_slt(instruction),
 			0b101011 => self.op_sltu(instruction),
 			_ => { println!("unrecognised instruction 0x{:08x}", instruction.as_bytes()); panic!("unrecognised instruction") }		
 		}
@@ -97,6 +104,17 @@ impl CPU {
 		println!("SLL ${}, ${}, {}", rd, rt, shift);
 
 		let v = self.reg(rt) << shift;
+		self.set_reg(rd, v);
+	}
+
+	fn op_srl(&mut self, instruction: Instruction) {
+		let rd    = instruction.rd();
+		let rt    = instruction.rt();
+		let shift = instruction.shift();
+
+		println!("SRL ${}, ${}, {}", rd, rt, shift);
+
+		let v = self.reg(rt) >> shift;
 		self.set_reg(rd, v);
 	}
 
@@ -190,6 +208,17 @@ impl CPU {
 		self.set_reg(rd, v);	
 	}
 
+	fn op_slt(&mut self, instruction: Instruction) {
+		let rd = instruction.rd();
+		let rt = instruction.rt();
+		let rs = instruction.rs();
+
+		println!("SLT ${}, ${}, ${}", rd, rs, rt);
+
+		let v = ((self.reg(rs) as i32) < (self.reg(rt) as i32)) as u32;
+		self.set_reg(rd, v);
+	}
+
 	fn op_sltu(&mut self, instruction: Instruction) {
 		let rd = instruction.rd();
 		let rt = instruction.rt();
@@ -224,7 +253,7 @@ impl CPU {
 		let v = self.reg(rs) as i32;
 		let test = (v < 0) as u32 ^ bgez;
 
-		println!("{}{} ${}, {}", op, lnk, rs, offset as i16);
+		println!("{}{} ${}, 0x{:04x}", op, lnk, rs, offset);
 
 		if test != 0 {
 			self.branch(offset);
@@ -260,7 +289,7 @@ impl CPU {
 		let rs = instruction.rs();
 		let offset = instruction.imm_se();
 
-		println!("BEQ ${}, ${}, {}", rs, rt, offset as i16);
+		println!("BEQ ${}, ${}, 0x{:04x}", rs, rt, offset);
 
 		if self.reg(rs) == self.reg(rt) {
 			self.branch(offset);
@@ -272,7 +301,7 @@ impl CPU {
 		let rs = instruction.rs();
 		let offset = instruction.imm_se();
 
-		println!("BNE ${}, ${}, {}", rs, rt, offset as i16);
+		println!("BNE ${}, ${}, 0x{:04x}", rs, rt, offset);
 
 		if self.reg(rs) != self.reg(rt) {
 			self.branch(offset);
@@ -283,7 +312,7 @@ impl CPU {
 		let rs = instruction.rs();
 		let offset = instruction.imm_se();
 
-		println!("BLEZ ${}, {}", rs, offset as i16);
+		println!("BLEZ ${}, 0x{:04x}", rs, offset);
 
 		if self.reg(rs) as i32 <= 0 {
 			self.branch(offset);
@@ -294,7 +323,7 @@ impl CPU {
 		let rs = instruction.rs();
 		let offset = instruction.imm_se();
 
-		println!("BGTZ ${}, {}", rs, offset as i16);
+		println!("BGTZ ${}, 0x{:04x}", rs, offset);
 
 		if self.reg(rs) as i32 > 0 {
 			self.branch(offset);
@@ -306,7 +335,7 @@ impl CPU {
 		let rs  = instruction.rs();
 		let imm = instruction.imm_se();
 
-		println!("ADDI ${}, ${}, {}", rt, rs, imm as i16);
+		println!("ADDI ${}, ${}, 0x{:04x}", rt, rs, imm);
 
 		let v = (self.reg(rs) as i32).overflowing_add(imm as i32);
 
@@ -322,7 +351,7 @@ impl CPU {
 		let rs  = instruction.rs();
 		let imm = instruction.imm_se();
 
-		println!("ADDIU ${}, ${}, {}", rt, rs, imm as i16);
+		println!("ADDIU ${}, ${}, 0x{:04x}", rt, rs, imm);
 
 		let v = self.reg(rs).wrapping_add(imm);
 		self.set_reg(rt, v);
@@ -333,9 +362,20 @@ impl CPU {
 		let rs = instruction.rs();
 		let imm = instruction.imm_se() as i32;
 
-		println!("SLTI ${}, ${} {}", rs, rt, imm);
+		println!("SLTI ${}, ${} 0x{:04x}", rs, rt, imm);
 
 		let v = (self.reg(rs) as i32) < imm;
+		self.set_reg(rt, v as u32);
+	}
+
+	fn op_sltiu(&mut self, instruction: Instruction) {
+		let rt = instruction.rt();
+		let rs = instruction.rs();
+		let imm = instruction.imm_se();
+
+		println!("SLTIU ${}, ${} 0x{:04x}", rs, rt, imm);
+
+		let v = self.reg(rs) < imm;
 		self.set_reg(rt, v as u32);
 	}
 
@@ -404,7 +444,11 @@ impl CPU {
 		let rs     = instruction.rs();
 		let offset = instruction.imm_se();
 
-		println!("LB ${}, {}(${})", rt, offset as i16, rs);
+		println!("LB ${}, 0x{:04x}(${})", rt, offset, rs);
+
+		if self.cop0.isolate_cache() {
+			return;
+		}
 
 		let addr = self.reg(rs).wrapping_add(offset);
 		let v = (self.load8(addr) as i8) as u32;
@@ -416,7 +460,11 @@ impl CPU {
 		let rs  = instruction.rs();
 		let offset = instruction.imm_se();
 
-		println!("LW ${}, {}(${})", rt, offset as i16, rs);
+		println!("LW ${}, 0x{:04x}(${})", rt, offset, rs);
+
+		if self.cop0.isolate_cache() {
+			return;
+		}
 
 		let addr = self.reg(rs).wrapping_add(offset);
 		let v = self.load32(addr);
@@ -428,7 +476,11 @@ impl CPU {
 		let rs  = instruction.rs();
 		let offset = instruction.imm_se();
 
-		println!("LBU ${}, {}(${})", rt, offset as i16, rs);
+		println!("LBU ${}, 0x{:04x}(${})", rt, offset, rs);
+
+		if self.cop0.isolate_cache() {
+			return;
+		}
 
 		let addr = self.reg(rs).wrapping_add(offset);
 		let v = self.load8(addr) as u32;
@@ -440,7 +492,11 @@ impl CPU {
 		let rs  = instruction.rs();
 		let offset = instruction.imm_se();
 
-		println!("SB ${}, {}(${})", rt, offset as i16, rs);
+		println!("SB ${}, 0x{:04x}(${})", rt, offset, rs);
+
+		if self.cop0.isolate_cache() {
+			return;
+		}
 
 		let addr = self.reg(rs).wrapping_add(offset);
 		let v = self.reg(rt);
@@ -452,7 +508,11 @@ impl CPU {
 		let rs  = instruction.rs();
 		let offset = instruction.imm_se();
 
-		println!("SH ${}, {}(${})", rt, offset as i16, rs);
+		println!("SH ${}, 0x{:04x}(${})", rt, offset, rs);
+
+		if self.cop0.isolate_cache() {
+			return;
+		}
 
 		let addr = self.reg(rs).wrapping_add(offset);
 		let v = self.reg(rt);
@@ -464,7 +524,11 @@ impl CPU {
 		let rs  = instruction.rs();
 		let offset = instruction.imm_se();
 
-		println!("SW ${}, {}(${})", rt, offset as i16, rs);
+		println!("SW ${}, 0x{:04x}(${})", rt, offset, rs);
+
+		if self.cop0.isolate_cache() {
+			return;
+		}
 
 		let addr = self.reg(rs).wrapping_add(offset);
 		let v = self.reg(rt);
@@ -473,24 +537,24 @@ impl CPU {
 
 	fn load8(&mut self, address: u32) -> u8 {
 		self.load_delay_slot = true;
-		self.interconnect.load8(self.cop0.isolate_cache(), address)
+		self.interconnect.load8(address)
 	}
 
 	fn load32(&mut self, address: u32) -> u32 {
 		self.load_delay_slot = true;
-		self.interconnect.load32(self.cop0.isolate_cache(), address)
+		self.interconnect.load32(address)
 	}
 
 	fn store8(&mut self, address: u32, data: u8) {
-		self.interconnect.store8(self.cop0.isolate_cache(), address, data);
+		self.interconnect.store8(address, data);
 	}
 
 	fn store16(&mut self, address: u32, data: u16) {
-		self.interconnect.store16(self.cop0.isolate_cache(), address, data);
+		self.interconnect.store16(address, data);
 	}
 
 	fn store32(&mut self, address: u32, data: u32) {
-		self.interconnect.store32(self.cop0.isolate_cache(), address, data);
+		self.interconnect.store32(address, data);
 	}
 
 	fn reg(&self, index: usize) -> u32 {
