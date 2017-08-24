@@ -38,7 +38,21 @@ impl CPU {
 		let instruction = Instruction::new(self.interconnect.load32(self.pc));
 
 		match instruction.opcode() {
-			0b000000 => self.op_special(instruction),
+			0b000000 => match instruction.function() {
+				0b000000 => self.op_sll(instruction),
+				0b000010 => self.op_srl(instruction),
+				0b000011 => self.op_sra(instruction),
+				0b001000 => self.op_jr(instruction),
+				0b001001 => self.op_jalr(instruction),
+				0b100000 => self.op_add(instruction),
+				0b100001 => self.op_addu(instruction),
+				0b100011 => self.op_subu(instruction),
+				0b100100 => self.op_and(instruction),
+				0b100101 => self.op_or(instruction),
+				0b101010 => self.op_slt(instruction),
+				0b101011 => self.op_sltu(instruction),
+				_ => { println!("unrecognised instruction 0x{:08x}", instruction.as_bytes()); panic!("unrecognised instruction") }		
+			},
 			0b000001 => self.op_bxx(instruction),
 			0b000010 => self.op_j(instruction),
 			0b000011 => self.op_jal(instruction),
@@ -75,24 +89,6 @@ impl CPU {
 			self.load_delay_slot = false;
 		} else {
 			self.regs.copy_from_slice(&self.load_delay_regs);
-		}
-	}
-
-	fn op_special(&mut self, instruction: Instruction) {
-		match instruction.function() {
-			0b000000 => self.op_sll(instruction),
-			0b000010 => self.op_srl(instruction),
-			0b000011 => self.op_sra(instruction),
-			0b001000 => self.op_jr(instruction),
-			0b001001 => self.op_jalr(instruction),
-			0b100000 => self.op_add(instruction),
-			0b100001 => self.op_addu(instruction),
-			0b100011 => self.op_subu(instruction),
-			0b100100 => self.op_and(instruction),
-			0b100101 => self.op_or(instruction),
-			0b101010 => self.op_slt(instruction),
-			0b101011 => self.op_sltu(instruction),
-			_ => { println!("unrecognised instruction 0x{:08x}", instruction.as_bytes()); panic!("unrecognised instruction") }		
 		}
 	}
 
@@ -262,7 +258,7 @@ impl CPU {
 
 	fn op_j(&mut self, instruction: Instruction) {
 		let target = instruction.target();
-		let jump_address = (self.pc & 0xf000_0000) | (target << 2);
+		let jump_address = ((self.pc + 4) & 0xf000_0000) | (target << 2);
 
 		println!("J 0x{:08x}", jump_address);
 
@@ -274,7 +270,7 @@ impl CPU {
 	fn op_jal(&mut self, instruction: Instruction) {
 		let target = instruction.target();
 		let pc = self.pc;
-		let jump_address = (pc & 0xf000_0000) | (target << 2);
+		let jump_address = ((pc + 4) & 0xf000_0000) | (target << 2);
 
 		println!("JAL 0x{:08x}", jump_address);
 
@@ -558,12 +554,17 @@ impl CPU {
 	}
 
 	fn reg(&self, index: usize) -> u32 {
-		self.regs[index]
+		if index > 0 {
+			self.regs[index]
+		} else {
+			0
+		}
 	}
 
 	fn set_reg(&mut self, index: usize, data: u32) {
-		self.load_delay_regs[index] = data;
-		self.load_delay_regs[0] = 0;
+		if index > 0 {
+			self.load_delay_regs[index] = data;
+		}
 	}
 
 	fn cop0_reg(&mut self, index: usize) -> u32 {

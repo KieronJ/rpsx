@@ -14,7 +14,7 @@ impl Instruction {
 	}
 
 	pub fn opcode(&self) -> u32 {
-		(self.instruction >> 26) & 0x3f
+		(self.instruction >> 26)
 	}
 
 	pub fn rs(&self) -> usize {
