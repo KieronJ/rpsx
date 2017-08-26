@@ -54,6 +54,18 @@ impl Status {
 		self.interrupt_enable_kernel_user_mode.set_value(data);
 	}
 
+	pub fn enter_exception(&mut self) {
+		self.interrupt_enable_kernel_user_mode.enter_exception();
+	}
+
+	pub fn exit_exception(&mut self) {
+		self.interrupt_enable_kernel_user_mode.exit_exception();
+	}
+
+	pub fn boot_exception_vector(&self) -> bool {
+		self.boot_exception_vector
+	}
+
 	pub fn isolate_cache(&self) -> bool {
 		self.isolate_cache
 	}
@@ -103,7 +115,7 @@ impl InterruptEnableKernelUserMode {
 		self.curr_interrupt_enable = false;
 	}
 
-	pub fn leave_exception(&mut self) {
+	pub fn exit_exception(&mut self) {
 		self.curr_kernel_user_mode = self.prev_kernel_user_mode;
 		self.curr_interrupt_enable = self.prev_interrupt_enable;
 		self.prev_kernel_user_mode = self.old_kernel_user_mode;

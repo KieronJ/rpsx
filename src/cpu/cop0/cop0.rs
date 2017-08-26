@@ -43,7 +43,7 @@ impl Cop0 {
 		match index {
 			3  => self.bpc = data,
 			5  => self.bda = data,
-			6  => println!("store to read-only cop0 register cop0_r6"),
+			6  => (), //A weird one, it is read-only but the BIOS writes to it. :/
 			7  => self.dcic = data,
 			8  => println!("store to read-only cop0 register cop0_r8"),
 			9  => self.bdam = data,
@@ -53,6 +53,29 @@ impl Cop0 {
 			14 => println!("store to read-only cop0 register cop0_r14"),
 			15 => println!("store to read-only cop0 register cop0_r15"),
 			_  => panic!("store to unknown cop0 register cop0_r{}", index)
+		}
+	}
+
+	pub fn enter_exception(&mut self, pc: u32, exception: u8, delay_slot: bool) {
+		self.status.enter_exception();
+		self.cause.enter_exception(exception, delay_slot);
+
+		if delay_slot {
+			self.epc = pc.wrapping_sub(4);
+		} else {
+			self.epc = pc;
+		}
+	}
+
+	pub fn exit_exception(&mut self) {
+		self.status.exit_exception();
+	}
+
+	pub fn exception_handler(&self) -> u32 {
+		if self.status.boot_exception_vector() {
+			0xbfc00180
+		} else {
+			0x80000080
 		}
 	}
 

@@ -3,14 +3,14 @@ extern crate byteorder;
 mod cpu;
 mod util;
 
-use std::env;
+//use std::env;
 use std::fs::File;
 use std::io::Read;
 use std::path::Path;
 use cpu::CPU;
 
 fn main() {
-	let bios_filepath = env::args().nth(1).unwrap();
+	let bios_filepath = "./bios/SCPH1001.bin"; //env::args().nth(1).unwrap();
 	let bios = read_file(bios_filepath);
 
 	let mut cpu = CPU::default();

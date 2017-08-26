@@ -1,5 +1,6 @@
 mod cop0;
 mod cpu;
+mod mips_instruction;
 mod instruction;
 mod interconnect;
 

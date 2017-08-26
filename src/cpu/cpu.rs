@@ -1,30 +1,41 @@
-use super::{Cop0, Instruction, Interconnect};
+use super::{ Cop0, Instruction, Interconnect };
+
+use cpu::mips_instruction::*;
+
+#[derive(Debug)]
+pub enum Exception {
+	ADDRLOAD = 4,
+	ADDRSTORE = 5,
+	SYSCALL = 8,
+	BREAKPOINT = 9,
+	RESERVED = 10,
+	COPROCESSOR = 11,
+	OVERFLOW = 12,
+}
 
 #[derive(Default)]
 pub struct CPU {
-	regs: [u32; 32],
-	load_delay_regs: [u32; 32],
+	pub regs: [u32; 32],
+	pub load_delay_regs: [u32; 32],
 
-	pc: u32,
+	pub pc: u32,
 
-	hi: u32,
-	lo: u32,
+	pub hi: u32,
+	pub lo: u32,
 
-	branch_delay_enabled: bool,
-	branch_delay_slot: bool,
-	branch_delay_pc: u32,
+	pub branch_delay_enabled: bool,
+	pub branch_delay_slot: bool,
+	pub branch_delay_pc: u32,
 
-	load_delay_slot: bool,
+	pub cop0: Cop0,
 
-	cop0: Cop0,
-
-	interconnect: Interconnect
+	pub interconnect: Interconnect
 }
 
 impl CPU {
 	pub fn init(&mut self, bios: Box<[u8]>) {
-		self.reset();
 		self.interconnect.init(bios);
+		self.reset();
 	}
 
 	pub fn reset(&mut self) {
@@ -33,527 +44,145 @@ impl CPU {
 	}
 
 	pub fn run(&mut self) {
-		print!("0x{:08x}: ", self.pc);
+		if self.pc % 4 != 0 {
+			self.enter_exception(Exception::ADDRLOAD)
+		}
 
+		//print!("0x{:08x}: ", self.pc);
+
+		self.branch_delay_slot = self.branch_delay_enabled;
+		self.branch_delay_enabled = false;
+
+		self.regs = self.load_delay_regs;
+
+		self.decode_and_execute();
+
+		if self.branch_delay_slot { 
+			self.pc = self.branch_delay_pc; 
+		}  else { 
+			self.pc = self.pc.wrapping_add(4); 
+		}
+	}
+
+	fn decode_and_execute(&mut self) {
 		let instruction = Instruction::new(self.interconnect.load32(self.pc));
 
 		match instruction.opcode() {
 			0b000000 => match instruction.function() {
-				0b000000 => self.op_sll(instruction),
-				0b000010 => self.op_srl(instruction),
-				0b000011 => self.op_sra(instruction),
-				0b001000 => self.op_jr(instruction),
-				0b001001 => self.op_jalr(instruction),
-				0b100000 => self.op_add(instruction),
-				0b100001 => self.op_addu(instruction),
-				0b100011 => self.op_subu(instruction),
-				0b100100 => self.op_and(instruction),
-				0b100101 => self.op_or(instruction),
-				0b101010 => self.op_slt(instruction),
-				0b101011 => self.op_sltu(instruction),
-				_ => { println!("unrecognised instruction 0x{:08x}", instruction.as_bytes()); panic!("unrecognised instruction") }		
+				0b000000 => op_sll(self, instruction),
+				0b000010 => op_srl(self, instruction),
+				0b000011 => op_sra(self, instruction),
+				0b000100 => op_sllv(self, instruction),
+				0b000110 => op_srlv(self, instruction),
+				0b000111 => op_srav(self, instruction),
+				0b001000 => op_jr(self, instruction),
+				0b001001 => op_jalr(self, instruction),
+				0b001100 => op_syscall(self),
+				0b001101 => op_break(self),
+				0b010000 => op_mfhi(self, instruction),
+				0b010001 => op_mthi(self, instruction),
+				0b010010 => op_mflo(self, instruction),
+				0b010011 => op_mtlo(self, instruction),
+				0b011000 => op_mult(self, instruction),
+				0b011001 => op_multu(self, instruction),
+				0b011010 => op_div(self, instruction),
+				0b011011 => op_divu(self, instruction),
+				0b100000 => op_add(self, instruction),
+				0b100001 => op_addu(self, instruction),
+				0b100010 => op_sub(self, instruction),
+				0b100011 => op_subu(self, instruction),
+				0b100100 => op_and(self, instruction),
+				0b100101 => op_or(self, instruction),
+				0b100110 => op_xor(self, instruction),
+				0b100111 => op_nor(self, instruction),
+				0b101010 => op_slt(self, instruction),
+				0b101011 => op_sltu(self, instruction),
+				_ => op_reserved(self, instruction)
 			},
-			0b000001 => self.op_bxx(instruction),
-			0b000010 => self.op_j(instruction),
-			0b000011 => self.op_jal(instruction),
-			0b000100 => self.op_beq(instruction),
-			0b000101 => self.op_bne(instruction),
-			0b000110 => self.op_blez(instruction),
-			0b000111 => self.op_bgtz(instruction),
-			0b001000 => self.op_addi(instruction),
-			0b001001 => self.op_addiu(instruction),
-			0b001010 => self.op_slti(instruction),
-			0b001011 => self.op_sltiu(instruction),
-			0b001100 => self.op_andi(instruction),
-			0b001101 => self.op_ori(instruction),
-			0b001111 => self.op_lui(instruction),
-			0b010000 => self.op_cop0(instruction),
-			0b100000 => self.op_lb(instruction),
-			0b100011 => self.op_lw(instruction),
-			0b100100 => self.op_lbu(instruction),
-			0b101000 => self.op_sb(instruction),
-			0b101001 => self.op_sh(instruction),
-			0b101011 => self.op_sw(instruction),
-			_ => { println!("unrecognised instruction 0x{:08x}", instruction.as_bytes()); panic!("unrecognised instruction") }
-		}
-
-		if self.branch_delay_enabled && !self.branch_delay_slot {
-			self.pc = self.branch_delay_pc;
-			self.branch_delay_enabled = false;
-		} else {
-			self.pc = self.pc.wrapping_add(4);
-			self.branch_delay_slot = false;
-		}
-
-		if self.load_delay_slot {
-			self.load_delay_slot = false;
-		} else {
-			self.regs.copy_from_slice(&self.load_delay_regs);
-		}
-	}
-
-	fn op_sll(&mut self, instruction: Instruction) {
-		let rd  = instruction.rd();
-		let rt  = instruction.rt();
-		let shift = instruction.shift();
-
-		println!("SLL ${}, ${}, {}", rd, rt, shift);
-
-		let v = self.reg(rt) << shift;
-		self.set_reg(rd, v);
-	}
-
-	fn op_srl(&mut self, instruction: Instruction) {
-		let rd    = instruction.rd();
-		let rt    = instruction.rt();
-		let shift = instruction.shift();
-
-		println!("SRL ${}, ${}, {}", rd, rt, shift);
-
-		let v = self.reg(rt) >> shift;
-		self.set_reg(rd, v);
-	}
-
-	fn op_sra(&mut self, instruction: Instruction) {
-		let rd    = instruction.rd();
-		let rt    = instruction.rt();
-		let shift = instruction.shift();
-
-		println!("SRA ${}, ${}, {}", rd, rt, shift);
-
-		let v = (self.reg(rt) as i32) >> shift;
-		self.set_reg(rd, v as u32);
-	}
-
-	fn op_jr(&mut self, instruction: Instruction) {
-		let rs = instruction.rs();
-		println!("JR ${}", rs);
-		self.branch_delay_enabled = true;
-		self.branch_delay_slot = true;
-		self.branch_delay_pc = self.reg(rs);
-	}
-
-	fn op_jalr(&mut self, instruction: Instruction) {
-		let rd = instruction.rd();
-		let rs = instruction.rs();
-		let pc = self.pc;
-		println!("JALR ${}", rs);
-		self.branch_delay_enabled = true;
-		self.branch_delay_slot = true;
-		self.branch_delay_pc = self.reg(rs);
-		self.set_reg(rd, pc.wrapping_add(8));
-	}
-
-	fn op_add(&mut self, instruction: Instruction) {
-		let rd = instruction.rd();
-		let rt = instruction.rt();
-		let rs = instruction.rs();
-
-		println!("ADD ${}, ${}, ${}", rd, rs, rt);
-
-		let v = (self.reg(rs) as i32).overflowing_add(self.reg(rt) as i32);
-
-		if v.1 {
-			panic!("ADD overflow")
-		}
-
-		self.set_reg(rd, v.0 as u32);
-	}
-
-	fn op_addu(&mut self, instruction: Instruction) {
-		let rd = instruction.rd();
-		let rt = instruction.rt();
-		let rs = instruction.rs();
-
-		println!("ADDU ${}, ${}, ${}", rd, rs, rt);
-
-		let v = self.reg(rs).wrapping_add(self.reg(rt));
-		self.set_reg(rd, v);
-	}
-
-	fn op_subu(&mut self, instruction: Instruction) {
-		let rd = instruction.rd();
-		let rt = instruction.rt();
-		let rs = instruction.rs();
-
-		println!("SUBU ${}, ${}, ${}", rd, rs, rt);
-
-		let v = self.reg(rs).wrapping_sub(self.reg(rt));
-		self.set_reg(rd, v);
-	}
-
-	fn op_and(&mut self, instruction: Instruction) {
-		let rd = instruction.rd();
-		let rt = instruction.rt();
-		let rs = instruction.rs();
-
-		println!("AND ${}, ${}, ${}", rd, rs, rt);
-
-		let v = self.reg(rs) & self.reg(rt);
-		self.set_reg(rd, v);	
-	}
-
-	fn op_or(&mut self, instruction: Instruction) {
-		let rd = instruction.rd();
-		let rt = instruction.rt();
-		let rs = instruction.rs();
-
-		println!("OR ${}, ${}, ${}", rd, rs, rt);
-
-		let v = self.reg(rs) | self.reg(rt);
-		self.set_reg(rd, v);	
-	}
-
-	fn op_slt(&mut self, instruction: Instruction) {
-		let rd = instruction.rd();
-		let rt = instruction.rt();
-		let rs = instruction.rs();
-
-		println!("SLT ${}, ${}, ${}", rd, rs, rt);
-
-		let v = ((self.reg(rs) as i32) < (self.reg(rt) as i32)) as u32;
-		self.set_reg(rd, v);
-	}
-
-	fn op_sltu(&mut self, instruction: Instruction) {
-		let rd = instruction.rd();
-		let rt = instruction.rt();
-		let rs = instruction.rs();
-
-		println!("SLTU ${}, ${}, ${}", rd, rs, rt);
-
-		let v = (self.reg(rs) < self.reg(rt)) as u32;
-		self.set_reg(rd, v);
-	}
-
-	fn op_bxx(&mut self, instruction: Instruction) {
-		let rs = instruction.rs();
-		let offset = instruction.imm_se();
-		let pc = self.pc;
-		let instruction = instruction.as_bytes();
-
-		let bgez = (instruction >> 16) & 0x1;
-		let link = (instruction >> 17) & 0xf == 8;
-
-		let mut op = "BLTZ";
-		if bgez != 0 {
-			op = "BGEZ";
-		}
-
-		let mut lnk = "";
-		if link {
-			self.set_reg(31, pc.wrapping_add(8));
-			lnk = "AL";
-		}
-
-		let v = self.reg(rs) as i32;
-		let test = (v < 0) as u32 ^ bgez;
-
-		println!("{}{} ${}, 0x{:04x}", op, lnk, rs, offset);
-
-		if test != 0 {
-			self.branch(offset);
+			0b000001 => op_bxx(self, instruction),
+			0b000010 => op_j(self, instruction),
+			0b000011 => op_jal(self, instruction),
+			0b000100 => op_beq(self, instruction),
+			0b000101 => op_bne(self, instruction),
+			0b000110 => op_blez(self, instruction),
+			0b000111 => op_bgtz(self, instruction),
+			0b001000 => op_addi(self, instruction),
+			0b001001 => op_addiu(self, instruction),
+			0b001010 => op_slti(self, instruction),
+			0b001011 => op_sltiu(self, instruction),
+			0b001100 => op_andi(self, instruction),
+			0b001101 => op_ori(self, instruction),
+			0b001110 => op_xori(self, instruction),
+			0b001111 => op_lui(self, instruction),
+			0b010000 => op_cop0(self, instruction),
+			0b010001 => op_cop1(self),
+			0b010010 => op_cop2(instruction),
+			0b010011 => op_cop3(self),
+			0b100000 => op_lb(self, instruction),
+			0b100001 => op_lh(self, instruction),
+			0b100010 => op_lwl(self, instruction),
+			0b100011 => op_lw(self, instruction),
+			0b100100 => op_lbu(self, instruction),
+			0b100101 => op_lhu(self, instruction),
+			0b100110 => op_lwr(self, instruction),
+			0b101000 => op_sb(self, instruction),
+			0b101001 => op_sh(self, instruction),
+			0b101010 => op_swl(self, instruction),
+			0b101011 => op_sw(self, instruction),
+			0b101110 => op_swr(self, instruction),
+			0b110000 => op_lwc0(self),
+			0b110001 => op_lwc1(self),
+			0b110010 => op_lwc2(instruction),
+			0b110011 => op_lwc3(self),
+			0b111000 => op_swc0(self),
+			0b111001 => op_swc1(self),
+			0b111010 => op_swc2(instruction),
+			0b111011 => op_swc3(self),
+			_ => op_reserved(self, instruction)
 		}
 	}
 
-	fn op_j(&mut self, instruction: Instruction) {
-		let target = instruction.target();
-		let jump_address = ((self.pc + 4) & 0xf000_0000) | (target << 2);
-
-		println!("J 0x{:08x}", jump_address);
-
-		self.branch_delay_enabled = true;
-		self.branch_delay_slot = true;
-		self.branch_delay_pc = jump_address;
-	}
-
-	fn op_jal(&mut self, instruction: Instruction) {
-		let target = instruction.target();
-		let pc = self.pc;
-		let jump_address = ((pc + 4) & 0xf000_0000) | (target << 2);
-
-		println!("JAL 0x{:08x}", jump_address);
-
-		self.branch_delay_enabled = true;
-		self.branch_delay_slot = true;
-		self.branch_delay_pc = jump_address;
-		self.set_reg(31, pc.wrapping_add(8));
-	}
-
-	fn op_beq(&mut self, instruction: Instruction) {
-		let rt = instruction.rt();
-		let rs = instruction.rs();
-		let offset = instruction.imm_se();
-
-		println!("BEQ ${}, ${}, 0x{:04x}", rs, rt, offset);
-
-		if self.reg(rs) == self.reg(rt) {
-			self.branch(offset);
-		}
-	}
-
-	fn op_bne(&mut self, instruction: Instruction) {
-		let rt = instruction.rt();
-		let rs = instruction.rs();
-		let offset = instruction.imm_se();
-
-		println!("BNE ${}, ${}, 0x{:04x}", rs, rt, offset);
-
-		if self.reg(rs) != self.reg(rt) {
-			self.branch(offset);
-		}
-	}
-
-	fn op_blez(&mut self, instruction: Instruction) {
-		let rs = instruction.rs();
-		let offset = instruction.imm_se();
-
-		println!("BLEZ ${}, 0x{:04x}", rs, offset);
-
-		if self.reg(rs) as i32 <= 0 {
-			self.branch(offset);
-		}
-	}
-
-	fn op_bgtz(&mut self, instruction: Instruction) {
-		let rs = instruction.rs();
-		let offset = instruction.imm_se();
-
-		println!("BGTZ ${}, 0x{:04x}", rs, offset);
-
-		if self.reg(rs) as i32 > 0 {
-			self.branch(offset);
-		}
-	}
-
-	fn op_addi(&mut self, instruction: Instruction) {
-		let rt  = instruction.rt();
-		let rs  = instruction.rs();
-		let imm = instruction.imm_se();
-
-		println!("ADDI ${}, ${}, 0x{:04x}", rt, rs, imm);
-
-		let v = (self.reg(rs) as i32).overflowing_add(imm as i32);
-
-		if v.1 {
-			panic!("ADDI overflow")
-		}
-
-		self.set_reg(rt, v.0 as u32);
-	}
-
-	fn op_addiu(&mut self, instruction: Instruction) {
-		let rt  = instruction.rt();
-		let rs  = instruction.rs();
-		let imm = instruction.imm_se();
-
-		println!("ADDIU ${}, ${}, 0x{:04x}", rt, rs, imm);
-
-		let v = self.reg(rs).wrapping_add(imm);
-		self.set_reg(rt, v);
-	}
-
-	fn op_slti(&mut self, instruction: Instruction) {
-		let rt = instruction.rt();
-		let rs = instruction.rs();
-		let imm = instruction.imm_se() as i32;
-
-		println!("SLTI ${}, ${} 0x{:04x}", rs, rt, imm);
-
-		let v = (self.reg(rs) as i32) < imm;
-		self.set_reg(rt, v as u32);
-	}
-
-	fn op_sltiu(&mut self, instruction: Instruction) {
-		let rt = instruction.rt();
-		let rs = instruction.rs();
-		let imm = instruction.imm_se();
-
-		println!("SLTIU ${}, ${} 0x{:04x}", rs, rt, imm);
-
-		let v = self.reg(rs) < imm;
-		self.set_reg(rt, v as u32);
-	}
-
-	fn op_andi(&mut self, instruction: Instruction) {
-		let rt  = instruction.rt();
-		let rs  = instruction.rs();
-		let imm = instruction.imm();
-
-		println!("ANDI ${}, ${}, 0x{:04x}", rt, rs, imm);
-
-		let v = self.reg(rs) & imm;
-		self.set_reg(rt, v);
-	}
-
-	fn op_ori(&mut self, instruction: Instruction) {
-		let rt  = instruction.rt();
-		let rs  = instruction.rs();
-		let imm = instruction.imm();
-
-		println!("ORI ${}, ${}, 0x{:04x}", rt, rs, imm);
-
-		let v = self.reg(rs) | imm;
-		self.set_reg(rt, v);
-	}
-
-	fn op_lui(&mut self, instruction: Instruction) {
-		let rt  = instruction.rt();
-		let imm = instruction.imm();
-
-		println!("LUI ${}, 0x{:04x}", rt, imm);
-
-		let v = imm << 16;
-		self.set_reg(rt, v);
-	}
-
-	fn op_cop0(&mut self, instruction: Instruction) {
-		match instruction.rs() {
-			0b00000 => self.op_mfc0(instruction),
-			0b00100 => self.op_mtc0(instruction),
-			_ => { println!("unrecognised cop0 instruction 0x{:08x}", instruction.as_bytes()); panic!("unrecognised cop0 instruction") }	
-		}
-	}
-
-	fn op_mfc0(&mut self, instruction: Instruction) {
-		let cpu_reg = instruction.rt();
-		let cop_reg = instruction.rd();
-
-		println!("MTC0 ${}, ${}", cop_reg, cpu_reg);
-
-		let v = self.cop0_reg(cop_reg);
-		self.set_reg(cpu_reg, v);
-	}
-
-	fn op_mtc0(&mut self, instruction: Instruction) {
-		let cpu_reg = instruction.rt();
-		let cop_reg = instruction.rd();
-
-		println!("MTC0 ${}, ${}", cop_reg, cpu_reg);
-
-		let v = self.reg(cpu_reg);
-		self.set_cop0_reg(cop_reg, v);
-	}
-
-	fn op_lb(&mut self, instruction: Instruction) {
-		let rt     = instruction.rt();
-		let rs     = instruction.rs();
-		let offset = instruction.imm_se();
-
-		println!("LB ${}, 0x{:04x}(${})", rt, offset, rs);
-
-		if self.cop0.isolate_cache() {
-			return;
-		}
-
-		let addr = self.reg(rs).wrapping_add(offset);
-		let v = (self.load8(addr) as i8) as u32;
-		self.set_reg(rt, v);
-	}
-
-	fn op_lw(&mut self, instruction: Instruction) {
-		let rt  = instruction.rt();
-		let rs  = instruction.rs();
-		let offset = instruction.imm_se();
-
-		println!("LW ${}, 0x{:04x}(${})", rt, offset, rs);
-
-		if self.cop0.isolate_cache() {
-			return;
-		}
-
-		let addr = self.reg(rs).wrapping_add(offset);
-		let v = self.load32(addr);
-		self.set_reg(rt, v);
-	}
-
-	fn op_lbu(&mut self, instruction: Instruction) {
-		let rt  = instruction.rt();
-		let rs  = instruction.rs();
-		let offset = instruction.imm_se();
-
-		println!("LBU ${}, 0x{:04x}(${})", rt, offset, rs);
-
-		if self.cop0.isolate_cache() {
-			return;
-		}
-
-		let addr = self.reg(rs).wrapping_add(offset);
-		let v = self.load8(addr) as u32;
-		self.set_reg(rt, v);
-	}
-
-	fn op_sb(&mut self, instruction: Instruction) {
-		let rt  = instruction.rt();
-		let rs  = instruction.rs();
-		let offset = instruction.imm_se();
-
-		println!("SB ${}, 0x{:04x}(${})", rt, offset, rs);
-
-		if self.cop0.isolate_cache() {
-			return;
-		}
-
-		let addr = self.reg(rs).wrapping_add(offset);
-		let v = self.reg(rt);
-		self.store8(addr, v as u8);
-	}
-
-	fn op_sh(&mut self, instruction: Instruction) {
-		let rt  = instruction.rt();
-		let rs  = instruction.rs();
-		let offset = instruction.imm_se();
-
-		println!("SH ${}, 0x{:04x}(${})", rt, offset, rs);
-
-		if self.cop0.isolate_cache() {
-			return;
-		}
-
-		let addr = self.reg(rs).wrapping_add(offset);
-		let v = self.reg(rt);
-		self.store16(addr, v as u16);
-	}
-
-	fn op_sw(&mut self, instruction: Instruction) {
-		let rt  = instruction.rt();
-		let rs  = instruction.rs();
-		let offset = instruction.imm_se();
-
-		println!("SW ${}, 0x{:04x}(${})", rt, offset, rs);
-
-		if self.cop0.isolate_cache() {
-			return;
-		}
-
-		let addr = self.reg(rs).wrapping_add(offset);
-		let v = self.reg(rt);
-		self.store32(addr, v);
-	}
-
-	fn load8(&mut self, address: u32) -> u8 {
-		self.load_delay_slot = true;
+	pub fn load8(&mut self, address: u32) -> u8 {
 		self.interconnect.load8(address)
 	}
 
-	fn load32(&mut self, address: u32) -> u32 {
-		self.load_delay_slot = true;
+	pub fn load16(&mut self, address: u32) -> u16 {
+		if address % 2 != 0 {
+			self.enter_exception(Exception::ADDRLOAD)
+		}
+
+		self.interconnect.load16(address)
+	}
+
+	pub fn load32(&mut self, address: u32) -> u32 {
+		if address % 4 != 0 {
+			self.enter_exception(Exception::ADDRLOAD)
+		}
+
 		self.interconnect.load32(address)
 	}
 
-	fn store8(&mut self, address: u32, data: u8) {
+	pub fn store8(&mut self, address: u32, data: u8) {
 		self.interconnect.store8(address, data);
 	}
 
-	fn store16(&mut self, address: u32, data: u16) {
+	pub fn store16(&mut self, address: u32, data: u16) {
+		if address % 2 != 0 {
+			self.enter_exception(Exception::ADDRSTORE)
+		}
+
 		self.interconnect.store16(address, data);
 	}
 
-	fn store32(&mut self, address: u32, data: u32) {
+	pub fn store32(&mut self, address: u32, data: u32) {
+		if address % 4 != 0 {
+			self.enter_exception(Exception::ADDRSTORE)
+		}
+
 		self.interconnect.store32(address, data);
 	}
 
-	fn reg(&self, index: usize) -> u32 {
+	pub fn reg(&self, index: usize) -> u32 {
 		if index > 0 {
 			self.regs[index]
 		} else {
@@ -561,24 +190,32 @@ impl CPU {
 		}
 	}
 
-	fn set_reg(&mut self, index: usize, data: u32) {
+	pub fn set_reg(&mut self, index: usize, data: u32) {
 		if index > 0 {
 			self.load_delay_regs[index] = data;
 		}
 	}
 
-	fn cop0_reg(&mut self, index: usize) -> u32 {
-		self.load_delay_slot = true;
+	pub fn cop0_reg(&mut self, index: usize) -> u32 {
 		self.cop0.reg(index)
 	}
 
-	fn set_cop0_reg(&mut self, index: usize, data: u32) {
+	pub fn set_cop0_reg(&mut self, index: usize, data: u32) {
 		self.cop0.set_reg(index, data);
 	}
 
-	fn branch(&mut self, offset: u32) {
+	pub fn branch(&mut self, offset: u32) {
 		self.branch_delay_enabled = true;
-		self.branch_delay_slot = true;
 		self.branch_delay_pc = self.pc.wrapping_add(4).wrapping_add(offset << 2);
+	}
+
+	pub fn enter_exception(&mut self, cause: Exception) {
+		println!("EXCEPTION: {:?} at 0x{:08x}", cause, self.pc);
+		self.cop0.enter_exception(self.pc, cause as u8, self.branch_delay_slot);
+		self.pc = self.cop0.exception_handler().wrapping_sub(4);
+	}
+
+	pub fn exit_exception(&mut self) {
+		self.cop0.exit_exception();
 	}
 }

@@ -19,8 +19,8 @@ impl Cause {
 		self.interrupt_pending |= ((data >> 8) & 0x03) as u8;
 	}
 
-	pub fn enter_exception(&mut self, exception: u8, branch_delay: bool) {
-		self.branch_delay = branch_delay;
+	pub fn enter_exception(&mut self, exception: u8, delay_slot: bool) {
+		self.branch_delay = delay_slot;
 		self.exception_code = exception & 0b11111;
 	}
 }
