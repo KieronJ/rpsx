@@ -1,29 +1,45 @@
 extern crate byteorder;
+extern crate sdl2;
 
-mod cpu;
-mod util;
+mod debugger;
+mod psx;
+pub mod util;
 
-//use std::env;
-use std::fs::File;
-use std::io::Read;
-use std::path::Path;
-use cpu::CPU;
+use std::env;
+use std::process;
 
-fn main() {
-	let bios_filepath = "./bios/SCPH1001.bin"; //env::args().nth(1).unwrap();
-	let bios = read_file(bios_filepath);
+//use debugger::Debugger;
+use psx::interrupt::Interrupt;
+use psx::System;
 
-	let mut cpu = CPU::default();
-	cpu.init(bios);
+fn main()
+{
+    let bios = match env::args().nth(1) {
+        Some(x) => x,
+        None => {
+            println!("usage: rpsx.exe rom");
+            process::exit(1);
+        }
+    };
 
-	loop {
-		cpu.run();
-	}
-}
+    //let system = System::new(&bios);
+    //let mut debugger = Debugger::new(system);
+	//debugger.reset();
+    //debugger.run();
 
-fn read_file<P: AsRef<Path>>(path: P) -> Box<[u8]> {
-	let mut file = File::open(path).unwrap();
-	let mut file_buffer = Vec::new();
-	file.read_to_end(&mut file_buffer).unwrap();
-	file_buffer.into_boxed_slice()
+    let mut system = System::new(&bios);
+    system.reset();
+    
+    loop {
+        for _ in 0..285620 {
+            system.run();
+    
+            for _ in 0..2 {
+                system.tick();
+            }
+        }
+    
+        system.render_frame();
+        system.set_interrupt(Interrupt::Vblank);
+    }
 }

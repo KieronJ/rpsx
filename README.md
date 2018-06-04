@@ -1,16 +1,12 @@
-## About
-This project is a means for me to test both Rust and Emudev.
+# rpsx
+A simple PlayStation emulator in Rust.
 
-## Overview
-This project is a simple attempt at a Playstation emulator.
+The emulator currently displays the boot animation, it then crashes when it tries to access a CDROM I/O port.
 
-## License
-This project is licensed under the Apache 2.0 license.
+# Screenshots
+Boot Screen
 
-## Contribution
-Unless you explicitly state otherwise, any contribution intentionally submitted for inclusion in the work by you, as defined in the Apache-2.0 license, shall be licensed as above, without any additional terms or conditions.  
+![alt text](https://raw.githubusercontent.com/kieronj/rpsx/master/screenshots/boot_screen.png)
 
-
-Feel free to contribute, however do note that I will try to implement most functionality myself.  
-
-Though any bugfixes/code improvements would be greatly appreciated!
+# License
+This project is licensed under the MIT license.

@@ -1,8 +1,9 @@
 [package]
 name = "rpsx"
 version = "0.1.0"
-authors = ["Kieron <kieron.josephs00@gmail.com>"]
-license = "Apache-2.0"
+authors = ["Kieron Josephs <kieron.josephs00@gmail.com>"]
+license = "MIT"
 
 [dependencies]
 byteorder = "1.0.0"
+sdl2 = "0.31.0"

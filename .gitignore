@@ -1,4 +1,4 @@
-bios/
-target/
-
-*.bkCargo.lock.exe.bin.bat
+/.vscode/
+/bios/
+/target/
+*.lock
