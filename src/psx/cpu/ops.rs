@@ -89,6 +89,13 @@ pub enum Operation {
     Mfc0(usize, usize),
     Mtc0(usize, usize),
     Rfe,
+    Mfc2,
+    Cfc2,
+    Mtc2,
+    Ctc2,
+    Bc2f,
+    Bc2t,
+    Cop2,
     Lb(usize, usize, u32),
     Lh(usize, usize, u32),
     Lwl(usize, usize, u32),
@@ -168,6 +175,22 @@ impl From<u32> for Operation {
                 0x10 => Rfe,
                 _ => Unknown(opcode),
             },
+            0x12 => match i.rs() & 0x10 {
+                0x00 => match i.rs() & 0x0f {
+                    0x00 => Mfc2,
+                    0x02 => Cfc2,
+                    0x04 => Mtc2,
+                    0x06 => Ctc2,
+                    0x08 => match i.rt() {
+                        0x00 => Bc2f,
+                        0x01 => Bc2t,
+                        _ => Unknown(opcode),
+                    }
+                    _ => Unknown(opcode),
+                },
+                0x10 => Cop2,
+                _ => unreachable!(),
+            }
             0x20 => Lb(i.rt(), i.rs(), i.imm_se()),
             0x21 => Lh(i.rt(), i.rs(), i.imm_se()),
             0x22 => Lwl(i.rt(), i.rs(), i.imm_se()),

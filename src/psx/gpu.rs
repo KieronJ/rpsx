@@ -88,14 +88,6 @@ enum DmaDirection {
 }
 
 #[derive(Clone, Copy)]
-enum HorizontalResolution {
-    X256,
-    X320,
-    X512,
-    X640,
-}
-
-#[derive(Clone, Copy)]
 enum TexturePageColours {
     TP4Bit,
     TP8Bit,
@@ -105,123 +97,64 @@ enum TexturePageColours {
 
 #[derive(Clone, Copy)]
 enum SemiTransparency {
-    ST00,
-    ST01,
-    ST10,
-    ST11,
+    ST0,
+    ST1,
+    ST2,
+    ST3,
 }
 
 #[derive(Clone, Copy)]
-enum TexturePageXBase {
-    TPX0000,
-    TPX0001,
-    TPX0010,
-    TPX0011,
-    TPX0100,
-    TPX0101,
-    TPX0110,
-    TPX0111,
-    TPX1000,
-    TPX1001,
-    TPX1010,
-    TPX1011,
-    TPX1100,
-    TPX1101,
-    TPX1110,
-    TPX1111,
-}
-
-struct GpuStatus {
-    line_odd: bool,
-    dma_direction: DmaDirection,
-    dma_ready: bool,
-    vram_ready: bool,
-    cmd_ready: bool,
-    // TODO: DMA / Data Request
-    irq: bool,
-    display_disable: bool,
-    vertical_interlace: bool,
-    display_colour_depth: bool,
-    video_mode: bool,
-    vertical_resolution: bool,
-    horizontal_resolution_1: HorizontalResolution,
-    horizontal_resolution_2: bool,
+struct GpuTexpage {
+    flip_y: bool,
+    flip_x: bool,
     texture_disable: bool,
-    reverse: bool,
-    // TODO: Interlace field
-    draw_pixels: bool,
-    set_mask_bit: bool,
     display_area_enable: bool,
-    dither: bool,
-    texture_page_colours: TexturePageColours,
+    dithering_enable: bool,
+    colour_depth: TexturePageColours,
     semi_transparency: SemiTransparency,
-    texture_page_y_base: bool,
-    texture_page_x_base: TexturePageXBase,
+    y_base: u32,
+    x_base: u32,
 }
 
-impl GpuStatus {
-    pub fn new() -> GpuStatus {
-        GpuStatus {
-            line_odd: false,
-            dma_direction: DmaDirection::Off,
-            dma_ready: true,
-            vram_ready: true,
-            cmd_ready: true,
-            // TODO: DMA / Data Request
-            irq: false,
-            display_disable: false,
-            vertical_interlace: false,
-            display_colour_depth: false,
-            video_mode: false,
-            vertical_resolution: false,
-            horizontal_resolution_1: HorizontalResolution::X256,
-            horizontal_resolution_2: false,
+impl GpuTexpage {
+    pub fn new() -> GpuTexpage {
+        GpuTexpage {
+            flip_y: false,
+            flip_x: false,
             texture_disable: false,
-            reverse: false,
-            // TODO: Interlace field
-            draw_pixels: false,
-            set_mask_bit: false,
             display_area_enable: false,
-            dither: false,
-            texture_page_colours: TexturePageColours::TP4Bit,
-            semi_transparency: SemiTransparency::ST00,
-            texture_page_y_base: false,
-            texture_page_x_base: TexturePageXBase::TPX0000,
+            dithering_enable: false,
+            colour_depth: TexturePageColours::TP4Bit,
+            semi_transparency: SemiTransparency::ST0,
+            y_base: 0,
+            x_base: 0,
         }
     }
 
-    pub fn read(&mut self) -> u32 {
-        let mut value = 0;
-
-        value |= (self.line_odd as u32) << 31;
-        value |= (self.dma_direction as u32) << 29;
-        value |= (self.dma_ready as u32) << 28;
-        value |= (self.vram_ready as u32) << 27;
-        value |= (self.cmd_ready as u32) << 26;
-        // TODO: DMA / Data Request
-        value |= (self.irq as u32) << 24;
-        value |= (self.display_disable as u32) << 23;
-        value |= (self.vertical_interlace as u32) << 22;
-        value |= (self.display_colour_depth as u32) << 21;
-        value |= (self.video_mode as u32) << 20;
-        value |= (self.vertical_resolution as u32) << 19;
-        value |= (self.horizontal_resolution_1 as u32) << 17;
-        value |= (self.horizontal_resolution_2 as u32) << 16;
-        value |= (self.texture_disable as u32) << 15;
-        value |= (self.reverse as u32) << 14;
-        // TODO: Interlace field
-        value |= (self.draw_pixels as u32) << 12;
-        value |= (self.set_mask_bit as u32) << 11;
-        value |= (self.display_area_enable as u32) << 10;
-        value |= (self.dither as u32) << 9;
-        value |= (self.texture_page_colours as u32) << 7;
-        value |= (self.semi_transparency as u32) << 5;
-        value |= (self.texture_page_y_base as u32) << 4;
-        value |= self.texture_page_x_base as u32;
-
-        self.line_odd = !self.line_odd;
-
-        value
+    pub fn from_u32(value: u32) -> GpuTexpage {
+        GpuTexpage {
+            flip_y: (value & 0x2000) != 0,
+            flip_x: (value & 0x1000) != 0,
+            texture_disable: (value & 0x800) != 0,
+            display_area_enable: (value & 0x400) != 0,
+            dithering_enable: (value & 0x200) != 0,
+            colour_depth: match (value & 0x180) >> 7 {
+                0 => TexturePageColours::TP4Bit,
+                1 => TexturePageColours::TP8Bit,
+                2 => TexturePageColours::TP15Bit,
+                3 => TexturePageColours::Reserved,
+                _ => unreachable!(),
+            },
+            semi_transparency: match (value & 0x60) >> 5 {
+                0 => SemiTransparency::ST0,
+                1 => SemiTransparency::ST1,
+                2 => SemiTransparency::ST2,
+                3 => SemiTransparency::ST3,
+                _ => unreachable!(),
+            },
+            y_base: (value & 0x10) * 16,
+            x_base: (value & 0xf) * 64,
+        }
     }
 }
 
@@ -236,7 +169,31 @@ pub struct Gpu {
     cpu_to_gpu_transfer: GpuTransfer,
     gpu_to_cpu_transfer: GpuTransfer,
 
-    status: GpuStatus,
+    interlace_line: bool,
+    dma_direction: DmaDirection,
+
+    dma_ready: bool,
+    vram_ready: bool,
+    cmd_ready: bool,
+
+    //TODO: DMA/Data Request
+
+    irq: bool,
+
+    display_disable: bool,
+    vertical_interlace: bool,
+    colour_depth: bool,
+    video_mode: bool,
+
+    vertical_resolution: u32,
+    horizontal_resolution: u32,
+
+    reverse: bool,
+
+    skip_masked_pixels: bool,
+    set_mask_bit: bool,
+
+    texpage: GpuTexpage,
 
     drawing_x_begin: u32,
     drawing_x_end: u32,
@@ -254,15 +211,12 @@ pub struct Gpu {
 
     display_area_x: u32,
     display_area_y: u32,
-
-    textured_rectangle_x_flip: bool,
-    textured_rectangle_y_flip: bool,
 }
 
 impl Gpu {
     pub fn new() -> Gpu {
         Gpu {
-            display: Display::new(256, 240, "rpsx"),
+            display: Display::new(1024, 512, "rpsx"),
 
             vram: vec![0; 0x100000].into_boxed_slice(),
 
@@ -272,7 +226,31 @@ impl Gpu {
             cpu_to_gpu_transfer: GpuTransfer::new(),
             gpu_to_cpu_transfer: GpuTransfer::new(),
 
-            status: GpuStatus::new(),
+            interlace_line: false,
+            dma_direction: DmaDirection::Off,
+
+            dma_ready: true,
+            vram_ready: true,
+            cmd_ready: true,
+
+            //TODO: DMA/Data Request
+
+            irq: false,
+
+            display_disable: false,
+            vertical_interlace: false,
+            colour_depth: false,
+            video_mode: false,
+
+            vertical_resolution: 240,
+            horizontal_resolution: 256,
+
+            reverse: false,
+
+            skip_masked_pixels: false,
+            set_mask_bit: false,
+
+            texpage: GpuTexpage::new(),
 
             drawing_x_begin: 0,
             drawing_x_end: 0,
@@ -290,9 +268,6 @@ impl Gpu {
 
             display_area_x: 0,
             display_area_y: 0,
-
-            textured_rectangle_x_flip: false,
-            textured_rectangle_y_flip: false,
         }
     }
 
@@ -313,7 +288,47 @@ impl Gpu {
     }
 
     pub fn gpustat(&mut self) -> u32 {
-        self.status.read()
+        let mut value = 0;
+
+        value |= (self.interlace_line as u32) << 31;
+        value |= (self.dma_direction as u32) << 29;
+        value |= (self.dma_ready as u32) << 28;
+        value |= (self.vram_ready as u32) << 27;
+        value |= (self.cmd_ready as u32) << 26;
+        // TODO: DMA / Data Request
+        value |= (self.irq as u32) << 24;
+        value |= (self.display_disable as u32) << 23;
+        value |= (self.vertical_interlace as u32) << 22;
+        value |= (self.colour_depth as u32) << 21;
+        value |= (self.video_mode as u32) << 20;
+        value |= match self.vertical_resolution {
+            480 => (1 << 19),
+            240 => 0,
+            _ => unreachable!(),
+        };
+        value |= match self.horizontal_resolution {
+            256 => 0x00,
+            320 => 0x02,
+            512 => 0x04,
+            640 => 0x06,
+            368 => 0x01,
+            _ => unreachable!(),
+        };
+        value |= (self.texpage.texture_disable as u32) << 15;
+        value |= (self.reverse as u32) << 14;
+        value |= (self.vertical_interlace as u32) << 13;
+        value |= (self.skip_masked_pixels as u32) << 12;
+        value |= (self.set_mask_bit as u32) << 11;
+        value |= (self.texpage.display_area_enable as u32) << 10;
+        value |= (self.texpage.dithering_enable as u32) << 9;
+        value |= (self.texpage.colour_depth as u32) << 7;
+        value |= (self.texpage.semi_transparency as u32) << 5;
+        //value |= (self.texture_page_y_base as u32) << 4;
+        //value |= self.texture_page_x_base as u32;
+
+        self.interlace_line = !self.interlace_line;
+
+        value
     }
 
     pub fn gp0_write(&mut self, word: u32) {
@@ -380,7 +395,7 @@ impl Gpu {
         }
 
         if self.command_buffer.full() {
-            self.status.cmd_ready = false;
+            self.cmd_ready = false;
         }
 
         if self.command_words_remaining == 0 {
@@ -389,10 +404,13 @@ impl Gpu {
             self.command_words_remaining = match command {
                 0x00 => 1,
                 0x01 => 1,
+                0x02 => 3,
                 0x28 => 5,
                 0x2c => 9,
+                0x2d => 9,
                 0x30 => 6,
                 0x38 => 8,
+                0x65 => 4,
                 0xa0 => 3,
                 0xc0 => 3,
                 0xe1 => 1,
@@ -421,6 +439,33 @@ impl Gpu {
             0x01 => {
                 // TODO: Clear Cache
             },
+            0x02 => {
+                let destination = self.command_buffer.pop();
+                let size = self.command_buffer.pop();
+
+                let colour = Colour::from_u32(command_word);
+
+                let r = (colour.r * 255.0) as u16;
+                let g = (colour.g * 255.0) as u16;
+                let b = (colour.b * 255.0) as u16;
+
+                let mut pixel: u16 = 0;
+                pixel |= (r & 0xf8) >> 3;
+                pixel |= (g & 0xf8) << 2;
+                pixel |= (b & 0xf8) << 7;
+
+                let x = destination & 0xffff;
+                let y = destination >> 16;
+                let w = size & 0xffff;
+                let h = size >> 16;
+
+                for ry in y..y+h {
+                    for rx in x..x+w {
+                        let destination_address = Gpu::vram_address(rx, ry);
+                        LittleEndian::write_u16(&mut self.vram[destination_address..], pixel);
+                    }
+                }
+            }
             0x28 => {
                 let coord1 = self.command_buffer.pop();
                 let coord2 = self.command_buffer.pop();
@@ -445,9 +490,7 @@ impl Gpu {
 
                 self.rasterise_quad_flat(quad, colour);
             },
-            0x2c => {
-                use self::TexturePageColours::*;
-
+            0x2c | 0x2d => {
                 let coord1 = self.command_buffer.pop();
                 let texcoord1 = self.command_buffer.pop();
                 let coord2 = self.command_buffer.pop();
@@ -457,18 +500,7 @@ impl Gpu {
                 let coord4 = self.command_buffer.pop();
                 let texcoord4 = self.command_buffer.pop();
 
-                let texpage = texcoord2 >> 16;
-
-                let tpx = (texpage & 0xf) * 64;
-                let tpy = ((texpage & 0x10) >> 4) * 256;
-
-                let tpc = match (texpage & 0x180) >> 7 {
-                    0 => TP4Bit,
-                    1 => TP8Bit,
-                    2 => TP15Bit,
-                    3 => Reserved,
-                    _ => unreachable!(),   
-                };
+                let texpage = GpuTexpage::from_u32(texcoord2 >> 16);
 
                 let clut = texcoord1 >> 16;
 
@@ -494,7 +526,7 @@ impl Gpu {
 
                 let quad = Quad::new(vertex1, vertex2, vertex3, vertex4);
 
-                self.rasterise_quad_textured(quad, tpx, tpy, tpc, clut_x, clut_y);
+                self.rasterise_quad_textured(quad, texpage, clut_x, clut_y);
             },
             0x30 => {
                 let colour1 = Colour::from_u32(command_word);
@@ -549,6 +581,46 @@ impl Gpu {
 
                 self.rasterise_quad_shaded(quad);
             },
+            0x65 => {
+                let colour = Colour::from_u32(command_word);
+
+                let coord = self.command_buffer.pop();
+                let x = coord & 0xffff;
+                let y = coord >> 16;
+
+                let texcoord = self.command_buffer.pop();
+
+                let tx = texcoord & 0xff;
+                let ty = (texcoord >> 8) & 0xff;
+
+                let clut = texcoord >> 16;
+                let clut_x = (clut & 0x3f) * 16;
+                let clut_y = (clut >> 6) & 0x1ff;
+
+                let size = self.command_buffer.pop();
+                let w = size & 0xffff;
+                let h = size >> 16;
+
+                let vector1 = Vector2f::new(x as f32, y as f32);
+                let vector2 = Vector2f::new((x + w) as f32, y as f32);
+                let vector3 = Vector2f::new(x as f32, (y + h) as f32);
+                let vector4 = Vector2f::new((x + w) as f32, (y + h) as f32);
+
+                let tc1 = Vector2f::new(tx as f32, ty as f32);
+                let tc2 = Vector2f::new(((tx + w) & 0xff) as f32, ty as f32);
+                let tc3 = Vector2f::new(tx as f32, ((ty + h) & 0xff) as f32);
+                let tc4 = Vector2f::new(((tx + w) & 0xff) as f32, ((ty + h) & 0xff) as f32);
+
+                let vertex1 = Vertex::new(vector1, tc1, colour);
+                let vertex2 = Vertex::new(vector2, tc2, colour);
+                let vertex3 = Vertex::new(vector3, tc3, colour);
+                let vertex4 = Vertex::new(vector4, tc4, colour);
+
+                let quad = Quad::new(vertex1, vertex2, vertex3, vertex4);
+
+                let texpage = self.texpage;
+                self.rasterise_quad_textured(quad, texpage, clut_x, clut_y);
+            },
             0xa0 => {
                 let destination = self.command_buffer.pop();
                 let size = self.command_buffer.pop();
@@ -588,13 +660,13 @@ impl Gpu {
                 self.gpu_to_cpu_transfer.active = true;
             },
             0xe1 => {
-                self.textured_rectangle_y_flip = (command_word & 0x2000) != 0;
-                self.textured_rectangle_x_flip = (command_word & 0x1000) != 0;
-                self.status.texture_disable = (command_word & 0x800) != 0;
-                self.status.display_area_enable = (command_word & 0x400) != 0;
-                self.status.dither = (command_word & 0x200) != 0;
+                self.texpage.flip_y = (command_word & 0x2000) != 0;
+                self.texpage.flip_x = (command_word & 0x1000) != 0;
+                self.texpage.texture_disable = (command_word & 0x800) != 0;
+                self.texpage.display_area_enable = (command_word & 0x400) != 0;
+                self.texpage.dithering_enable = (command_word & 0x200) != 0;
 
-                self.status.texture_page_colours = match (command_word & 0x180) >> 7 {
+                self.texpage.colour_depth = match (command_word & 0x180) >> 7 {
                     0 => TexturePageColours::TP4Bit,
                     1 => TexturePageColours::TP8Bit,
                     2 => TexturePageColours::TP15Bit,
@@ -602,35 +674,16 @@ impl Gpu {
                     _ => unreachable!(),   
                 };
 
-                self.status.semi_transparency = match (command_word & 0x60) >> 5 {
-                    0 => SemiTransparency::ST00,
-                    1 => SemiTransparency::ST01,
-                    2 => SemiTransparency::ST10,
-                    3 => SemiTransparency::ST11,
+                self.texpage.semi_transparency = match (command_word & 0x60) >> 5 {
+                    0 => SemiTransparency::ST0,
+                    1 => SemiTransparency::ST1,
+                    2 => SemiTransparency::ST2,
+                    3 => SemiTransparency::ST3,
                     _ => unreachable!(),   
                 };
 
-                self.status.texture_page_y_base = (command_word & 0x10) != 0;
-
-                self.status.texture_page_x_base = match command_word & 0xf {
-                    0x0 => TexturePageXBase::TPX0000,
-                    0x1 => TexturePageXBase::TPX0001,
-                    0x2 => TexturePageXBase::TPX0010,
-                    0x3 => TexturePageXBase::TPX0011,
-                    0x4 => TexturePageXBase::TPX0100,
-                    0x5 => TexturePageXBase::TPX0101,
-                    0x6 => TexturePageXBase::TPX0110,
-                    0x7 => TexturePageXBase::TPX0111,
-                    0x8 => TexturePageXBase::TPX1000,
-                    0x9 => TexturePageXBase::TPX1001,
-                    0xa => TexturePageXBase::TPX1010,
-                    0xb => TexturePageXBase::TPX1011,
-                    0xc => TexturePageXBase::TPX1100,
-                    0xd => TexturePageXBase::TPX1101,
-                    0xe => TexturePageXBase::TPX1110,
-                    0xf => TexturePageXBase::TPX1111,
-                    _ => unreachable!(),
-                };
+                self.texpage.y_base = (command_word & 0x10) * 16;
+                self.texpage.x_base = (command_word & 0xf) * 64;
             },
             0xe2 => {
                 self.texture_window_offset_y = ((command_word & 0xf_8000) >> 15) * 8;
@@ -651,8 +704,8 @@ impl Gpu {
                 self.drawing_x_offset = command_word & 0x7ff;
             },
             0xe6 => {
-                self.status.draw_pixels = (command_word & 0x2) != 0;
-                self.status.set_mask_bit = (command_word & 0x1) != 0;
+                self.skip_masked_pixels = (command_word & 0x2) != 0;
+                self.set_mask_bit = (command_word & 0x1) != 0;
             },
             _ => panic!("[GPU] [ERROR] Unknown command GP0({:02x})", command),
         }
@@ -674,49 +727,15 @@ impl Gpu {
                 self.execute_gp1_command(0x0700_0000);
                 self.execute_gp1_command(0x0800_0000);
 
-                self.textured_rectangle_y_flip = (value & 0x2000) != 0;
-                self.textured_rectangle_x_flip = (value & 0x1000) != 0;
-                self.status.texture_disable = (value & 0x800) != 0;
-                self.status.display_area_enable = (value & 0x400) != 0;
-                self.status.dither = (value & 0x200) != 0;
-
-                self.status.texture_page_colours = match (value & 0x180) >> 7 {
-                    0 => TexturePageColours::TP4Bit,
-                    1 => TexturePageColours::TP8Bit,
-                    2 => TexturePageColours::TP15Bit,
-                    3 => TexturePageColours::Reserved,
-                    _ => unreachable!(),   
-                };
-
-                self.status.semi_transparency = match (value & 0x60) >> 5 {
-                    0 => SemiTransparency::ST00,
-                    1 => SemiTransparency::ST01,
-                    2 => SemiTransparency::ST10,
-                    3 => SemiTransparency::ST11,
-                    _ => unreachable!(),   
-                };
-
-                self.status.texture_page_y_base = (value & 0x10) != 0;
-
-                self.status.texture_page_x_base = match value & 0xf {
-                    0x0 => TexturePageXBase::TPX0000,
-                    0x1 => TexturePageXBase::TPX0001,
-                    0x2 => TexturePageXBase::TPX0010,
-                    0x3 => TexturePageXBase::TPX0011,
-                    0x4 => TexturePageXBase::TPX0100,
-                    0x5 => TexturePageXBase::TPX0101,
-                    0x6 => TexturePageXBase::TPX0110,
-                    0x7 => TexturePageXBase::TPX0111,
-                    0x8 => TexturePageXBase::TPX1000,
-                    0x9 => TexturePageXBase::TPX1001,
-                    0xa => TexturePageXBase::TPX1010,
-                    0xb => TexturePageXBase::TPX1011,
-                    0xc => TexturePageXBase::TPX1100,
-                    0xd => TexturePageXBase::TPX1101,
-                    0xe => TexturePageXBase::TPX1110,
-                    0xf => TexturePageXBase::TPX1111,
-                    _ => unreachable!(),
-                };
+                self.texpage.flip_y = false;
+                self.texpage.flip_x = false;
+                self.texpage.texture_disable = false;
+                self.texpage.display_area_enable = false;
+                self.texpage.dithering_enable = false;
+                self.texpage.colour_depth =TexturePageColours::TP4Bit;
+                self.texpage.semi_transparency = SemiTransparency::ST0;
+                self.texpage.y_base = 0;
+                self.texpage.x_base = 0;
 
                 self.texture_window_offset_y = 0;
                 self.texture_window_offset_x = 0;
@@ -732,20 +751,20 @@ impl Gpu {
                 self.drawing_y_offset = 0;
                 self.drawing_x_offset = 0;
 
-                self.status.draw_pixels = false;
-                self.status.set_mask_bit = false;
+                self.skip_masked_pixels = false;
+                self.set_mask_bit = false;
             },
             0x01 => {
                 self.command_buffer.clear();
             },
             0x02 => {
-                self.status.irq = false;
+                self.irq = false;
             },
             0x03 => {
-                self.status.display_disable = (value & 0x1) != 0;
+                self.display_disable = (value & 0x1) != 0;
             },
             0x04 => {
-                self.status.dma_direction = match value & 0x3 {
+                self.dma_direction = match value & 0x3 {
                     0 => DmaDirection::Off,
                     1 => DmaDirection::Fifo,
                     2 => DmaDirection::CpuToGp0,
@@ -764,23 +783,27 @@ impl Gpu {
                 // TODO: Vertical Display Range
             },
             0x08 => {
-                self.status.reverse = (value & 0x80) != 0;
-                self.status.horizontal_resolution_2 = (value & 0x40) != 0;
-                self.status.vertical_interlace = (value & 0x20) != 0;
+                self.reverse = (value & 0x80) != 0;
+                self.vertical_interlace = (value & 0x20) != 0;
+                self.colour_depth = (value & 0x10) != 0;
 
-                self.status.display_colour_depth = (value & 0x10) != 0;
-
-                if self.status.display_colour_depth {
+                if self.colour_depth {
                     panic!("[GPU] [ERROR] Unsupported display colour depth: 24bit.");
                 }
 
-                self.status.video_mode = (value & 0x8) != 0;
-                self.status.vertical_resolution = (value & 0x4) != 0;
-                self.status.horizontal_resolution_1 = match value & 0x3 {
-                    0 => HorizontalResolution::X256,
-                    1 => HorizontalResolution::X320,
-                    2 => HorizontalResolution::X512,
-                    3 => HorizontalResolution::X640,
+                self.video_mode = (value & 0x8) != 0;
+
+                self.vertical_resolution = match (self.vertical_interlace, (value & 0x4) != 0) {
+                    (true, true) => 480,
+                    _ => 240,
+                };
+
+                self.horizontal_resolution = match ((value & 0x40) != 0, value & 0x3) {
+                    (true, _) => 368,
+                    (false, 0) => 256,
+                    (false, 1) => 320,
+                    (false, 2) => 512,
+                    (false, 3) => 640,
                     _ => unreachable!(),
                 };
 
@@ -796,12 +819,15 @@ impl Gpu {
         let b = (colour.b * 255.0) as u16;
 
         let mut pixel: u16 = 0;
-        pixel |= (r & 0xf8) << 7;
+        pixel |= (r & 0xf8) >> 3;
         pixel |= (g & 0xf8) << 2;
-        pixel |= (b & 0xf8) >> 3;
+        pixel |= (b & 0xf8) << 7;
 
-        let x = (self.drawing_x_offset + xcoord) as usize;
-        let y = (self.drawing_x_offset + ycoord) as usize;
+        let mut x = (self.drawing_x_offset + xcoord) as usize;
+        let mut y = (self.drawing_x_offset + ycoord) as usize;
+
+        x &= 1023;
+        y &= 511;
 
         self.vram[2 * (x + y * 1024)] = pixel as u8;
         self.vram[2 * (x + y * 1024) + 1] = (pixel >> 8) as u8;
@@ -860,7 +886,7 @@ impl Gpu {
         }
     }
 
-    fn rasterise_triangle_textured(&mut self, triangle: Triangle, tpx: u32, tpy: u32, tpc: TexturePageColours, clut_x: u32, clut_y: u32) {
+    fn rasterise_triangle_textured(&mut self, triangle: Triangle, texpage: GpuTexpage, clut_x: u32, clut_y: u32) {
         let (min, max) = triangle.bounding_box();
 
         let mut y = min.y;
@@ -882,19 +908,24 @@ impl Gpu {
 
                     let texture_colour;
 
-                    match tpc {
+                    match texpage.colour_depth {
                         TexturePageColours::TP4Bit => {
-                            let texture_pixel = self.read_clut_4bit(texcoord.x as u32, texcoord.y as u32, tpx, tpy, clut_x, clut_y);
+                            let texture_pixel = self.read_clut_4bit(texcoord.x as u32, texcoord.y as u32, texpage.x_base, texpage.y_base, clut_x, clut_y);
 
                             if texture_pixel == 0 {
                                 draw_pixel = false;
                             }
 
-                            texture_colour = Colour::from_u16_bgr(texture_pixel);
+                            texture_colour = Colour::from_u16(texture_pixel);
                         },
                         TexturePageColours::TP8Bit => panic!("Unsupported texture bit-depth: 8-bit CLUT"),
                         TexturePageColours::TP15Bit | TexturePageColours::Reserved => {
-                            let texture_pixel = self.read_texpage(texcoord.x as u32, texcoord.y as u32, tpx, tpy);
+                            let texture_pixel = self.read_texpage(texcoord.x as u32, texcoord.y as u32, texpage.x_base, texpage.y_base);
+
+                            if texture_pixel == 0 {
+                                draw_pixel = false;
+                            }
+
                             texture_colour = Colour::from_u16(texture_pixel);
                         },
                     };
@@ -962,7 +993,7 @@ impl Gpu {
         self.rasterise_triangle_shaded(t2);
     }
 
-    fn rasterise_quad_textured(&mut self, quad: Quad, tpx: u32, tpy: u32, tpc: TexturePageColours, clut_x: u32, clut_y: u32) {
+    fn rasterise_quad_textured(&mut self, quad: Quad, texpage: GpuTexpage, clut_x: u32, clut_y: u32) {
         let a = quad.vertices[0];
         let b = quad.vertices[1];
         let c = quad.vertices[2];
@@ -971,30 +1002,11 @@ impl Gpu {
         let t1 = Triangle::new(a, b, c);
         let t2 = Triangle::new(b, c, d);
 
-        self.rasterise_triangle_textured(t1, tpx, tpy, tpc, clut_x, clut_y);
-        self.rasterise_triangle_textured(t2, tpx, tpy, tpc, clut_x, clut_y);
+        self.rasterise_triangle_textured(t1, texpage, clut_x, clut_y);
+        self.rasterise_triangle_textured(t2, texpage, clut_x, clut_y);
     }
 
     pub fn update_video_mode(&mut self) {
-        let h1 = self.status.horizontal_resolution_1;
-        let h2 = self.status.horizontal_resolution_2;
-
-        let v = self.status.vertical_resolution;
-        let i = self.status.vertical_interlace;
-
-        let width = match (h1, h2) {
-            (_, true) => 368,
-            (HorizontalResolution::X256, false) => 256,
-            (HorizontalResolution::X320, false) => 320,
-            (HorizontalResolution::X512, false) => 512,
-            (HorizontalResolution::X640, false) => 640,
-        };
-
-        let height = match (v, i) {
-            (true, true) => 480,
-            (_, _) => 240,
-        };
-
-        self.display.update_video_mode(width, height);
+        //self.display.update_video_mode(self.horizontal_resolution, self.vertical_resolution);
     }
 }

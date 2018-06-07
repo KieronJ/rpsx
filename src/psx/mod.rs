@@ -1,5 +1,6 @@
 mod bus;
 pub mod cpu;
+mod cdrom;
 mod display;
 mod dma;
 mod gpu;
@@ -29,6 +30,10 @@ impl System {
     }
 
     pub fn tick(&mut self) {
+        if self.cpu.bus().cdrom().check_interrupts() {
+            self.set_interrupt(Interrupt::Cdrom);
+        }
+
         if self.cpu.bus().timer0().tick() {
             self.set_interrupt(Interrupt::Tmr0);
         }

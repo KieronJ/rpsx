@@ -23,17 +23,9 @@ impl Colour {
     }
 
     pub fn from_u16(colour: u16) -> Colour {
-        let r = ((colour >> 7) as u8) & 0xf8;
-        let g = ((colour >> 2) as u8) & 0xf8;
-        let b = ((colour << 3) as u8) & 0xf8;
-
-        Colour::from_u8(r, g, b)
-    }
-
-    pub fn from_u16_bgr(colour: u16) -> Colour {
-        let b = ((colour >> 7) as u8) & 0xf8;
-        let g = ((colour >> 2) as u8) & 0xf8;
         let r = ((colour << 3) as u8) & 0xf8;
+        let g = ((colour >> 2) as u8) & 0xf8;
+        let b = ((colour >> 7) as u8) & 0xf8;
 
         Colour::from_u8(r, g, b)
     }
