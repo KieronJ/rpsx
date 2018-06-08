@@ -57,7 +57,7 @@ impl CdromStat {
         value |= (self.motor_enabled as u8) << 1;
         value |= (self.error as u8) << 0;
 
-        value | (1 << 6)
+        value
     }
 }
 
@@ -112,6 +112,8 @@ impl CdromQueue {
 pub struct Cdrom {
     index: CdromIndex,
 
+    transmission_busy: bool,
+
     stat: CdromStat,
 
     parameter_buffer: CdromQueue,
@@ -125,6 +127,8 @@ impl Cdrom {
     pub fn new() -> Cdrom {
         Cdrom {
             index: CdromIndex::Index0,
+
+            transmission_busy: false,
 
             stat: CdromStat::new(),
 
@@ -144,7 +148,7 @@ impl Cdrom {
                 println!("[CDROM] [INFO] GetStat");
                 self.response_buffer.push(self.stat.as_u8());
 
-                self.interrupt_flag = 0x3;
+                self.interrupt_flag |= 0x3;
             },
             0x19 => {
                 self.execute_test_command();
@@ -153,6 +157,8 @@ impl Cdrom {
         };
 
         self.parameter_buffer.clear();
+
+        self.transmission_busy = true;
     }
 
     fn execute_test_command(&mut self) {
@@ -162,15 +168,19 @@ impl Cdrom {
             0x20 => {
                 println!("[CDROM] [INFO] GetBiosDateVersion");
 
-                self.response_buffer.push(0x94);
-                self.response_buffer.push(0x09);
-                self.response_buffer.push(0x19);
-                self.response_buffer.push(0xc0);
+                self.response_buffer.push(0x97);
+                self.response_buffer.push(0x01);
+                self.response_buffer.push(0x10);
+                self.response_buffer.push(0xc2);
 
-                self.interrupt_flag = 0x3;
+                self.interrupt_flag |= 0x3;
             },
             _ => panic!("[CDROM] [ERROR] Unknown test command 0x{:x}", command),
         }
+    }
+
+    pub fn clear_tb(&mut self) {
+        self.transmission_busy = false;
     }
 
     pub fn check_interrupts(&self) -> bool {
@@ -178,12 +188,13 @@ impl Cdrom {
             return false;
         }
 
-        (self.interrupt_flag & self.interrupt_enable & 0x07) != 0
+        (self.interrupt_flag & self.interrupt_enable & 0x1f) != 0
     }
 
     pub fn read_status_register(&self) -> u32 {
         let mut value = 0;
 
+        value |= (self.transmission_busy as u32) << 7;
         value |= (!self.response_buffer.empty() as u32) << 5;
         value |= (!self.parameter_buffer.full() as u32) << 4;
         value |= (self.parameter_buffer.empty() as u32) << 3;
@@ -208,7 +219,9 @@ impl Cdrom {
         use self::CdromIndex::*;
 
         match self.index {
-            Index0 => self.execute_command(value as u8),
+            Index0 => {
+                self.execute_command(value as u8);
+            },
             _ => panic!("[CDROM] [ERROR] Store to CDROM_REG_1 {:?}", self.index),
         };
     }
@@ -243,8 +256,8 @@ impl Cdrom {
 
         match self.index {
             Index1 => {
-                let flags = value & 0x1f;
-                self.interrupt_flag &= !flags as u8;
+                let flags = (value & 0x1f) as u8;
+                self.interrupt_flag &= !flags;
 
                 if (value & 0x40) != 0 {
                     self.parameter_buffer.clear();

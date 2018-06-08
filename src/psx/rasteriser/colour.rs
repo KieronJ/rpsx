@@ -45,4 +45,16 @@ impl Colour {
 
         (r, g, b)
     }
+
+    pub fn to_u16(&self) -> u16 {
+        let mut pixel = 0;
+
+        let (r, g, b) = self.to_u8();
+
+        pixel |= ((r as u16) & 0xf8) >> 3;
+        pixel |= ((g as u16) & 0xf8) << 2;
+        pixel |= ((b as u16) & 0xf8) << 7;
+
+        pixel
+    }
 }

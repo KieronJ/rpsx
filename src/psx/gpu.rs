@@ -3,6 +3,11 @@ use byteorder::{LittleEndian, ByteOrder};
 use super::display::Display;
 use super::rasteriser::{Colour, Quad, Triangle, Vector2f, Vertex};
 
+pub const DITHER_TABLE: [isize; 16] = [-4,  0, -3,  1,
+                                        2, -2,  3, -1,
+                                       -3,  1, -4,  0,
+                                        3, -1,  2, -2];
+
 struct GpuTransfer {
     x: u32,
     y: u32,
@@ -216,7 +221,7 @@ pub struct Gpu {
 impl Gpu {
     pub fn new() -> Gpu {
         Gpu {
-            display: Display::new(1024, 512, "rpsx"),
+            display: Display::new(256, 240, "rpsx"),
 
             vram: vec![0; 0x100000].into_boxed_slice(),
 
@@ -271,6 +276,28 @@ impl Gpu {
         }
     }
 
+    fn dither_get_offset(x: isize, y: isize) -> isize {
+        let xi = x & 0x3;
+        let yi = y & 0x3;
+
+        let index = (xi + yi * 4) as usize;
+        DITHER_TABLE[index]
+    }
+
+    fn dither_saturating_add(v: u8, d: isize) -> u8 {
+        let r = (v as isize) + d;
+
+        if r < 0 {
+            return 0;
+        }
+
+        if r > 0xff {
+            return 0xff;
+        }
+
+        r as u8
+    }
+
     pub fn render_frame(&mut self) {
         self.display.draw(&self.vram);
         self.display.handle_events();
@@ -323,8 +350,8 @@ impl Gpu {
         value |= (self.texpage.dithering_enable as u32) << 9;
         value |= (self.texpage.colour_depth as u32) << 7;
         value |= (self.texpage.semi_transparency as u32) << 5;
-        //value |= (self.texture_page_y_base as u32) << 4;
-        //value |= self.texture_page_x_base as u32;
+        value |= self.texpage.y_base / 16;
+        value |= self.texpage.x_base / 64;
 
         self.interlace_line = !self.interlace_line;
 
@@ -410,6 +437,7 @@ impl Gpu {
                 0x2d => 9,
                 0x30 => 6,
                 0x38 => 8,
+                0x64 => 4,
                 0x65 => 4,
                 0xa0 => 3,
                 0xc0 => 3,
@@ -444,24 +472,20 @@ impl Gpu {
                 let size = self.command_buffer.pop();
 
                 let colour = Colour::from_u32(command_word);
+                let pixel = colour.to_u16();
 
-                let r = (colour.r * 255.0) as u16;
-                let g = (colour.g * 255.0) as u16;
-                let b = (colour.b * 255.0) as u16;
-
-                let mut pixel: u16 = 0;
-                pixel |= (r & 0xf8) >> 3;
-                pixel |= (g & 0xf8) << 2;
-                pixel |= (b & 0xf8) << 7;
-
-                let x = destination & 0xffff;
-                let y = destination >> 16;
-                let w = size & 0xffff;
+                let x_start = destination & 0xfff0;
+                let y_start = destination >> 16;
+                
+                let w = (size) & 0xfff0;
                 let h = size >> 16;
 
-                for ry in y..y+h {
-                    for rx in x..x+w {
-                        let destination_address = Gpu::vram_address(rx, ry);
+                let x_end = x_start + w;
+                let y_end = y_start + h;
+
+                for y in y_start..y_end {
+                    for x in x_start..x_end + 0x10 {
+                        let destination_address = Gpu::vram_address(x, y);
                         LittleEndian::write_u16(&mut self.vram[destination_address..], pixel);
                     }
                 }
@@ -526,22 +550,28 @@ impl Gpu {
 
                 let quad = Quad::new(vertex1, vertex2, vertex3, vertex4);
 
-                self.rasterise_quad_textured(quad, texpage, clut_x, clut_y);
+                let dither = match command {
+                    0x2c => true,
+                    0x2d => false,
+                    _ => unreachable!(),
+                };
+
+                self.rasterise_quad_textured(quad, texpage, clut_x, clut_y, dither);
             },
             0x30 => {
                 let colour1 = Colour::from_u32(command_word);
-                let coord1 = self.command_buffer.pop();
+                let coord1 = self.command_buffer.pop() as i32;
 
                 let colour2 = Colour::from_u32(self.command_buffer.pop());
-                let coord2 = self.command_buffer.pop();
+                let coord2 = self.command_buffer.pop() as i32;
 
                 let colour3 = Colour::from_u32(self.command_buffer.pop());
-                let coord3 = self.command_buffer.pop();
+                let coord3 = self.command_buffer.pop() as i32;
 
-                let vector1 = Vector2f::new((coord1 & 0xffff) as f32, (coord1 >> 16) as f32);
-                let vector2 = Vector2f::new((coord2 & 0xffff) as f32, (coord2 >> 16) as f32);
-                let vector3 = Vector2f::new((coord3 & 0xffff) as f32, (coord3 >> 16) as f32);
-    
+                let mut vector1 = Vector2f::new((coord1 & 0xffff) as f32, (coord1 >> 16) as f32);
+                let mut vector2 = Vector2f::new((coord2 & 0xffff) as f32, (coord2 >> 16) as f32);
+                let mut vector3 = Vector2f::new((coord3 & 0xffff) as f32, (coord3 >> 16) as f32);
+
                 let texcoord = Vector2f::new(0.0, 0.0);
 
                 let vertex1 = Vertex::new(vector1, texcoord, colour1);
@@ -550,7 +580,7 @@ impl Gpu {
 
                 let triangle = Triangle::new(vertex1, vertex2, vertex3);
 
-                self.rasterise_triangle_shaded(triangle);
+                self.rasterise_triangle_shaded(triangle, true);
             },
             0x38 => {
                 let colour1 = Colour::from_u32(command_word);
@@ -579,9 +609,9 @@ impl Gpu {
 
                 let quad = Quad::new(vertex1, vertex2, vertex3, vertex4);
 
-                self.rasterise_quad_shaded(quad);
+                self.rasterise_quad_shaded(quad, true);
             },
-            0x65 => {
+            0x64 | 0x65 => {
                 let colour = Colour::from_u32(command_word);
 
                 let coord = self.command_buffer.pop();
@@ -619,7 +649,7 @@ impl Gpu {
                 let quad = Quad::new(vertex1, vertex2, vertex3, vertex4);
 
                 let texpage = self.texpage;
-                self.rasterise_quad_textured(quad, texpage, clut_x, clut_y);
+                self.rasterise_quad_textured(quad, texpage, clut_x, clut_y, false);
             },
             0xa0 => {
                 let destination = self.command_buffer.pop();
@@ -692,11 +722,11 @@ impl Gpu {
                 self.texture_window_mask_x = (command_word & 0x1f) * 8;
             },
             0xe3 => {
-                self.drawing_y_begin = command_word & 0x7_fc00 >> 10;
+                self.drawing_y_begin = (command_word & 0x7_fc00) >> 10;
                 self.drawing_x_begin = command_word & 0x3ff;
             },
             0xe4 => {
-                self.drawing_y_end = command_word & 0x7_fc00 >> 10;
+                self.drawing_y_end = (command_word & 0x7_fc00) >> 10;
                 self.drawing_x_end = command_word & 0x3ff;
             },
             0xe5 => {
@@ -709,8 +739,6 @@ impl Gpu {
             },
             _ => panic!("[GPU] [ERROR] Unknown command GP0({:02x})", command),
         }
-
-        //self.status.cmd_ready = true;
     }
 
     pub fn execute_gp1_command(&mut self, value: u32) {
@@ -813,21 +841,44 @@ impl Gpu {
         }
     }
 
-    fn rasterise_pixel(&mut self, xcoord: u32, ycoord: u32, colour: Colour) {
-        let r = (colour.r * 255.0) as u16;
-        let g = (colour.g * 255.0) as u16;
-        let b = (colour.b * 255.0) as u16;
+    fn rasterise_pixel(&mut self, x_coord: isize, y_coord: isize, colour: Colour, dither: bool) {
+        if x_coord < 0 || x_coord >= 1024 || y_coord < 0 || y_coord >= 512 {
+            return;
+        }
 
-        let mut pixel: u16 = 0;
-        pixel |= (r & 0xf8) >> 3;
-        pixel |= (g & 0xf8) << 2;
-        pixel |= (b & 0xf8) << 7;
+        if (x_coord as u32) < self.drawing_x_begin {
+            return;
+        }
 
-        let mut x = (self.drawing_x_offset + xcoord) as usize;
-        let mut y = (self.drawing_x_offset + ycoord) as usize;
+        if (x_coord as u32) > self.drawing_x_end {
+            return;
+        }
 
-        x &= 1023;
-        y &= 511;
+        if (y_coord as u32) < self.drawing_y_begin {
+            return;
+        }
+
+        if (y_coord as u32) > self.drawing_y_end {
+            return;
+        }
+
+        let (mut r, mut g, mut b) = colour.to_u8();
+
+        let pixel;
+
+        if dither && self.texpage.dithering_enable {
+            let dither_offset = Gpu::dither_get_offset(x_coord, y_coord);
+            r = Gpu::dither_saturating_add(r, dither_offset);
+            g = Gpu::dither_saturating_add(g, dither_offset);
+            b = Gpu::dither_saturating_add(b, dither_offset);
+            
+            pixel = Colour::from_u8(r, g, b).to_u16();
+        } else {
+            pixel = colour.to_u16();
+        }
+
+        let x = x_coord as usize;
+        let y = y_coord as usize;
 
         self.vram[2 * (x + y * 1024)] = pixel as u8;
         self.vram[2 * (x + y * 1024) + 1] = (pixel >> 8) as u8;
@@ -844,12 +895,12 @@ impl Gpu {
             while x < max.x {
                 let v = triangle.barycentric_vector(x, y);
 
-                let vx = v.x.floor() as isize;
-                let vy = v.y.floor() as isize;
-                let vz = v.z.floor() as isize;
+                let vx = v.x.round() as isize;
+                let vy = v.y.round() as isize;
+                let vz = v.z.round() as isize;
 
                 if (vx | vy | vz) >= 0 {
-                    self.rasterise_pixel(x as u32, y as u32, colour);
+                    self.rasterise_pixel(x as isize, y as isize, colour, false);
                 }
 
                 x += 1.0;
@@ -859,7 +910,7 @@ impl Gpu {
         }
     }
 
-    fn rasterise_triangle_shaded(&mut self, triangle: Triangle) {
+    fn rasterise_triangle_shaded(&mut self, triangle: Triangle, dither: bool) {
         let (min, max) = triangle.bounding_box();
 
         let mut y = min.y;
@@ -876,7 +927,7 @@ impl Gpu {
 
                 if (vx | vy | vz) >= 0 {
                     let colour = triangle.interpolate_colour(v);
-                    self.rasterise_pixel(x as u32, y as u32, colour);
+                    self.rasterise_pixel(x as isize, y as isize, colour, dither);
                 }
 
                 x += 1.0;
@@ -886,7 +937,7 @@ impl Gpu {
         }
     }
 
-    fn rasterise_triangle_textured(&mut self, triangle: Triangle, texpage: GpuTexpage, clut_x: u32, clut_y: u32) {
+    fn rasterise_triangle_textured(&mut self, triangle: Triangle, texpage: GpuTexpage, clut_x: u32, clut_y: u32, dither: bool) {
         let (min, max) = triangle.bounding_box();
 
         let mut y = min.y;
@@ -931,7 +982,7 @@ impl Gpu {
                     };
 
                     if draw_pixel {
-                        self.rasterise_pixel(x as u32, y as u32, texture_colour);
+                        self.rasterise_pixel(x as isize, y as isize, texture_colour, dither);
                     }
                 }
 
@@ -946,9 +997,7 @@ impl Gpu {
         let x = tpx + texcoord_x;
         let y = tpy + texcoord_y;
 
-        let address = 2 * (x + y * 1024);
-
-        LittleEndian::read_u16(&self.vram[address as usize..])
+        LittleEndian::read_u16(&self.vram[Gpu::vram_address(x, y)..])
     }
 
     fn read_clut_4bit(&self, texcoord_x: u32, texcoord_y: u32, tpx: u32, tpy: u32, clut_x: u32, clut_y: u32) -> u16 {
@@ -980,7 +1029,7 @@ impl Gpu {
         self.rasterise_triangle_flat(t2, colour);
     }
 
-    fn rasterise_quad_shaded(&mut self, quad: Quad) {
+    fn rasterise_quad_shaded(&mut self, quad: Quad, dither: bool) {
         let a = quad.vertices[0];
         let b = quad.vertices[1];
         let c = quad.vertices[2];
@@ -989,11 +1038,11 @@ impl Gpu {
         let t1 = Triangle::new(a, b, c);
         let t2 = Triangle::new(b, c, d);
 
-        self.rasterise_triangle_shaded(t1);
-        self.rasterise_triangle_shaded(t2);
+        self.rasterise_triangle_shaded(t1, dither);
+        self.rasterise_triangle_shaded(t2, dither);
     }
 
-    fn rasterise_quad_textured(&mut self, quad: Quad, texpage: GpuTexpage, clut_x: u32, clut_y: u32) {
+    fn rasterise_quad_textured(&mut self, quad: Quad, texpage: GpuTexpage, clut_x: u32, clut_y: u32, dither: bool) {
         let a = quad.vertices[0];
         let b = quad.vertices[1];
         let c = quad.vertices[2];
@@ -1002,11 +1051,11 @@ impl Gpu {
         let t1 = Triangle::new(a, b, c);
         let t2 = Triangle::new(b, c, d);
 
-        self.rasterise_triangle_textured(t1, texpage, clut_x, clut_y);
-        self.rasterise_triangle_textured(t2, texpage, clut_x, clut_y);
+        self.rasterise_triangle_textured(t1, texpage, clut_x, clut_y, dither);
+        self.rasterise_triangle_textured(t2, texpage, clut_x, clut_y, dither);
     }
 
     pub fn update_video_mode(&mut self) {
-        //self.display.update_video_mode(self.horizontal_resolution, self.vertical_resolution);
+        self.display.update_video_mode(self.horizontal_resolution, self.vertical_resolution);
     }
 }

@@ -30,6 +30,8 @@ impl System {
     }
 
     pub fn tick(&mut self) {
+        self.cpu.bus().cdrom().clear_tb();
+
         if self.cpu.bus().cdrom().check_interrupts() {
             self.set_interrupt(Interrupt::Cdrom);
         }
