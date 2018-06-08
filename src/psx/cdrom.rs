@@ -199,7 +199,7 @@ impl Cdrom {
         value |= (!self.parameter_buffer.full() as u32) << 4;
         value |= (self.parameter_buffer.empty() as u32) << 3;
         value |= self.index as u32;
-
+        
         value
     }
 

@@ -923,7 +923,7 @@ impl R3000A {
         let pc = self.pc;
         let physical_address = self.translate_address(pc);
 
-        self.bus.load(BusWidth::WORD, physical_address)
+        self.bus.load(physical_address)
     }
 
     fn translate_address(&self, virtual_address: u32) -> u32
@@ -932,7 +932,7 @@ impl R3000A {
         virtual_region.translate_address(virtual_address)
     }
 
-    fn load(&mut self, width: BusWidth, address: u32) -> u32 {
+    fn load(&mut self, address: u32) -> u32 {
         self.last_load = address;
 
         if address == 0x1f80_1070 {
@@ -946,22 +946,22 @@ impl R3000A {
         let physical_address = self.translate_address(address);
 
         if !self.cop0.isolate_cache() {
-            self.bus.load(width, physical_address)
+            self.bus.load(physical_address)
         } else {
             0
         }
     }
 
     fn load8(&mut self, address: u32) -> u8 {
-        self.load(BusWidth::BYTE, address) as u8
+        self.load(address) as u8
     }
 
     fn load16(&mut self, address: u32) -> u16 {
-        self.load(BusWidth::HALF, address) as u16
+        self.load(address) as u16
     }
 
     fn load32(&mut self, address: u32) -> u32 {
-        self.load(BusWidth::WORD, address)
+        self.load(address)
     }
 
     fn store(&mut self, width: BusWidth, address: u32, value: u32) {

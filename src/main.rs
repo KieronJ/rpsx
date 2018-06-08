@@ -1,7 +1,7 @@
 extern crate byteorder;
 extern crate sdl2;
 
-mod debugger;
+//mod debugger;
 mod psx;
 pub mod util;
 

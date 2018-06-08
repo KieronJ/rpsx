@@ -60,7 +60,7 @@ impl Bus {
         &mut self.timer2
     }
 
-    fn fetch(&mut self, address: u32) -> u32 {
+    pub fn load(&mut self, address: u32) -> u32 {
         match address {
             0x0000_0000...0x001f_ffff => LittleEndian::read_u32(&self.ram[address as usize..]),
             0x1f00_0000...0x1f07_ffff => { 0xffff_ffff }, //println!("[MMU] [INFO] Load from EXPENSION_1 region address: 0x{:08x}", address); 0xffff_ffff },
@@ -85,18 +85,6 @@ impl Bus {
             0x1fc0_0000...0x1fc7_ffff => LittleEndian::read_u32(&self.bios[address as usize - 0x1fc0_0000..]),
             _ => panic!("[BUS] [ERROR] Load from unrecognised address 0x{:08x}", address),
         }
-    }
-
-    pub fn load(&mut self, width: BusWidth, address: u32) -> u32 {
-        use self::BusWidth::*;
-
-        let mask = match width {
-            BYTE => 0x0000_00ff,
-            HALF => 0x0000_ffff,
-            WORD => 0xffff_ffff,
-        };
-
-        self.fetch(address) & mask
     }
 
     pub fn store(&mut self, width: BusWidth, address: u32, value: u32) {
