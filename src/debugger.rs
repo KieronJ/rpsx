@@ -4,7 +4,6 @@ use std::io::{stdin, stdout, Write};
 use super::psx::System;
 use super::psx::cpu::{R3000A, REGISTERS};
 use super::psx::cpu::ops::Operation;
-use super::psx::interrupt::Interrupt;
 
 #[derive(Clone)]
 pub struct Breakpoint {
@@ -98,20 +97,16 @@ impl Debugger {
     pub fn run(&mut self)
     {
         while self.running {
-            for _ in 0..285620 {
-                if !self.cont {
-                    print!("rpsx> ");
-                    stdout().flush().unwrap();
+            if !self.cont {
+                print!("rpsx> ");
+                stdout().flush().unwrap();
 
-                    self.process_command(Command::from_stdin());
-                }
+                self.process_command(Command::from_stdin());
+            }
 
-                if self.cont || self.step {
+            if self.cont || self.step {
+                for _ in 0..7 {
                     self.system.run();
-
-                    for _ in 0..2 {
-                        self.system.tick();
-                    }
 
                     if self.trace {
                         let cpu = self.system.cpu();
@@ -125,10 +120,11 @@ impl Debugger {
 
                     self.step = false;
                 }
-            }
 
-            self.system.render_frame();
-            self.system.set_interrupt(Interrupt::Vblank);
+                self.system.tick(7);
+                self.system.check_dma_int();
+                self.system.tick_gpu(22);
+            }
         }
     }
 
@@ -291,13 +287,14 @@ impl Debugger {
             Srlv(rd, rt, rs) => write!(&mut inst_str, "SRLV {}, {}, {}", REGISTERS[rd], REGISTERS[rt], REGISTERS[rs]),
             Srav(rd, rt, rs) => write!(&mut inst_str, "SRLV {}, {}, {}", REGISTERS[rd], REGISTERS[rt], REGISTERS[rs]),
             Jr(rs) => write!(&mut inst_str, "JR {}", REGISTERS[rs]),
-            Jalr(rd, rs) => write!(&mut inst_str, "JR {}, {}", REGISTERS[rd], REGISTERS[rs]),
+            Jalr(rd, rs) => write!(&mut inst_str, "JALR {}, {}", REGISTERS[rd], REGISTERS[rs]),
             Syscall => write!(&mut inst_str, "SYSCALL"),
             Break => write!(&mut inst_str, "BREAK"),
             Mfhi(rd) => write!(&mut inst_str, "MFHI {}", REGISTERS[rd]),
             Mthi(rs) => write!(&mut inst_str, "MTHI {}", REGISTERS[rs]),
             Mflo(rd) => write!(&mut inst_str, "MFLO {}", REGISTERS[rd]),
             Mtlo(rs) => write!(&mut inst_str, "MTLO {}", REGISTERS[rs]),
+            Mult(rs, rt) => write!(&mut inst_str, "MULT {}, {}", REGISTERS[rs], REGISTERS[rt]),
             Multu(rs, rt) => write!(&mut inst_str, "MULTU {}, {}", REGISTERS[rs], REGISTERS[rt]),
             Div(rs, rt) => write!(&mut inst_str, "DIV {}, {}", REGISTERS[rs], REGISTERS[rt]),
             Divu(rs, rt) => write!(&mut inst_str, "DIVU {}, {}", REGISTERS[rs], REGISTERS[rt]),
@@ -311,10 +308,7 @@ impl Debugger {
             Nor(rd, rs, rt) => write!(&mut inst_str, "OR {}, {}, {}", REGISTERS[rd], REGISTERS[rs], REGISTERS[rt]),
             Slt(rd, rs, rt) => write!(&mut inst_str, "SLT {}, {}, {}", REGISTERS[rd], REGISTERS[rs], REGISTERS[rt]),
             Sltu(rd, rs, rt) => write!(&mut inst_str, "SLTU {}, {}, {}", REGISTERS[rd], REGISTERS[rs], REGISTERS[rt]),
-            Bltz(rs, offset) => write!(&mut inst_str, "BLTZ {}, 0x{:04x}", REGISTERS[rs], offset),
-            Bgez(rs, offset) => write!(&mut inst_str, "BGEZ {}, 0x{:04x}", REGISTERS[rs], offset),
-            Bltzal(rs, offset) => write!(&mut inst_str, "BLTZAL {}, 0x{:04x}", REGISTERS[rs], offset),
-            Bgezal(rs, offset) => write!(&mut inst_str, "BGEZAL {}, 0x{:04x}", REGISTERS[rs], offset),
+            Bcond(rs, rt, offset) => write!(&mut inst_str, "BCOND {}, 0x{:04x}", REGISTERS[rs], offset),
             J(target) => write!(&mut inst_str, "J 0x{:04x}", (current_pc & 0xf000_0000) | (target << 2)),
             Jal(target) => write!(&mut inst_str, "JAL 0x{:04x}", (current_pc & 0xf000_0000) | (target << 2)),
             Beq(rs, rt, offset) => write!(&mut inst_str, "BEQ {}, {}, 0x{:04x}", REGISTERS[rs], REGISTERS[rt], offset),
@@ -332,13 +326,13 @@ impl Debugger {
             Mfc0(rd, rt) =>  write!(&mut inst_str, "MFC0 {}, cop0r{}", REGISTERS[rt], rd),
             Mtc0(rd, rt) =>  write!(&mut inst_str, "MTC0 {}, cop0r{}", REGISTERS[rt], rd),
             Rfe => write!(&mut inst_str, "RFE"),
-            Mfc2 => write!(&mut inst_str, "MFC2"),
-            Cfc2 => write!(&mut inst_str, "CFC2"),
-            Mtc2 => write!(&mut inst_str, "MTC2"),
-            Ctc2 => write!(&mut inst_str, "CTC2"),
+            Mfc2(rd, rt) => write!(&mut inst_str, "MFC2 {}, cop2r{}", REGISTERS[rt], rd),
+            Cfc2(rd, rt) => write!(&mut inst_str, "CFC2 {}, cop2r{}", REGISTERS[rt], rd),
+            Mtc2(rd, rt) => write!(&mut inst_str, "MTC2 {}, cop2r{}", REGISTERS[rt], rd),
+            Ctc2(rd, rt) => write!(&mut inst_str, "CTC2 {}, cop2r{}", REGISTERS[rt], rd),
             Bc2f => write!(&mut inst_str, "BC2F"),
             Bc2t => write!(&mut inst_str, "BC2T"),
-            Cop2 => write!(&mut inst_str, "COP2"),
+            Cop2(function) => write!(&mut inst_str, "COP2 0x{:08x}", function),
             Lb(rt, rs, offset) => write!(&mut inst_str, "LB {}, 0x{:04x}({})", REGISTERS[rt], offset, REGISTERS[rs]),
             Lh(rt, rs, offset) => write!(&mut inst_str, "LH {}, 0x{:04x}({})", REGISTERS[rt], offset, REGISTERS[rs]),
             Lwl(rt, rs, offset) => write!(&mut inst_str, "LWL {}, 0x{:04x}({})", REGISTERS[rt], offset, REGISTERS[rs]),
@@ -351,6 +345,8 @@ impl Debugger {
             Swl(rt, rs, offset) => write!(&mut inst_str, "SWL {}, 0x{:04x}({})", REGISTERS[rt], offset, REGISTERS[rs]),
             Sw(rt, rs, offset) => write!(&mut inst_str, "SW {}, 0x{:04x}({})", REGISTERS[rt], offset, REGISTERS[rs]),
             Swr(rt, rs, offset) => write!(&mut inst_str, "SWR {}, 0x{:04x}({})", REGISTERS[rt], offset, REGISTERS[rs]),
+            Lwc2(rt, rs, offset) => write!(&mut inst_str, "LWC2 cop2r{}, 0x{:04x}({})", rt, offset, REGISTERS[rs]),
+            Swc2(rt, rs, offset) => write!(&mut inst_str, "SW cop2r{}, 0x{:04x}({})", rt, offset, REGISTERS[rs]),
             Unknown(opcode) => write!(&mut inst_str, "UNKNOWN 0x{:08x}", opcode),
         }.unwrap();
 

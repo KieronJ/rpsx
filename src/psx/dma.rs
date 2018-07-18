@@ -183,6 +183,7 @@ pub struct Dma {
     channels: [DmaChannel; 7],
     control: u32,
     interrupt: u32,
+    int: bool,
 }
 
 impl Dma {
@@ -191,6 +192,7 @@ impl Dma {
             channels: [DmaChannel::new(); 7],
             control: 0x07654321,
             interrupt: 0,
+            int: false,
         }
     }
 
@@ -202,6 +204,49 @@ impl Dma {
     pub fn channel_mut(&mut self, port: DmaPort) -> &mut DmaChannel {
         let channel = DmaPort::from(port);
         &mut self.channels[channel]
+    }
+
+    pub fn finish_set_interrupt(&mut self, port: DmaPort) {
+        let bit = DmaPort::from(port);
+
+        let mask = 1 << (16 + bit);
+        let status = 1 << (24 + bit);
+
+        if self.interrupt & mask != 0 {
+            self.interrupt |= status;
+        }
+
+        self.update_master_flag();
+    }
+
+    fn update_master_flag(&mut self) {
+        let prev_master = (self.interrupt & 0x8000_0000) != 0;
+
+        let force = (self.interrupt & (1 << 15)) != 0;
+        let master_enable = (self.interrupt & (1 << 23)) != 0;
+        let flag = (self.interrupt & 0x7f00_0000) >> 24;
+        let enable = (self.interrupt & 0x007f_0000)  >> 16;
+
+        let interrupt_enable = (flag & enable) != 0;
+
+        self.interrupt &= !0x8000_0000;
+
+        if force | (master_enable & interrupt_enable) {
+            self.interrupt |= 0x8000_0000;
+
+            if !prev_master {
+                self.int = true;
+            }
+        }
+    }
+
+    pub fn check_interrupts(&mut self) -> bool {
+        if self.int {
+            self.int = false;
+            return true;
+        }
+
+        false
     }
 
     pub fn read(&self, address: u32) -> u32 {
@@ -233,6 +278,7 @@ impl Dma {
             7 => match register {
                 0 => self.control,
                 4 => self.interrupt,
+                6 => self.interrupt,
                 _ => panic!("[ERROR] [DMA] Unknown DMA read 0x{:08x}", address),
             },
             _ => unreachable!(),
@@ -278,7 +324,12 @@ impl Dma {
             },
             7 => match register {
                 0 => self.control = value,
-                4 => self.interrupt = value,
+                4 | 6 => {
+                    self.interrupt &= 0xff00_0000;
+                    self.interrupt &= !(value & 0x7f00_0000);
+                    self.interrupt |= value & 0xff_ffff;
+                    self.update_master_flag();
+                },
                 _ => panic!("[ERROR] [DMA] Unknown DMA write 0x{:08x}", address),
             },
             _ => unreachable!(),

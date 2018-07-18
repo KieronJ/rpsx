@@ -3,43 +3,46 @@ extern crate sdl2;
 
 //mod debugger;
 mod psx;
+pub mod queue;
 pub mod util;
 
 use std::env;
-use std::process;
 
 //use debugger::Debugger;
-use psx::interrupt::Interrupt;
 use psx::System;
 
-fn main()
-{
-    let bios = match env::args().nth(1) {
+fn main() {
+    let bios_filepath = match env::args().nth(1) {
         Some(x) => x,
         None => {
-            println!("usage: rpsx.exe rom");
-            process::exit(1);
+            println!("usage: rpsx.exe rom game");
+            return;
         }
     };
 
-    //let system = System::new(&bios);
+    let game_filepath = match env::args().nth(2) {
+        Some(x) => x,
+        None => {
+            println!("usage: rpsx.exe rom game");
+            return;
+        }
+    };
+    
+    //let system = System::new(&bios_filepath, &game_filepath);
     //let mut debugger = Debugger::new(system);
 	//debugger.reset();
     //debugger.run();
 
-    let mut system = System::new(&bios);
+    let mut system = System::new(&bios_filepath, &game_filepath);
     system.reset();
-    
+
     loop {
-        for _ in 0..285620 {
+        for _ in 0..7 {
             system.run();
-    
-            for _ in 0..2 {
-                system.tick();
-            }
         }
     
-        system.render_frame();
-        system.set_interrupt(Interrupt::Vblank);
+        system.tick(7);
+        system.check_dma_int();
+        system.tick_gpu(22);
     }
 }

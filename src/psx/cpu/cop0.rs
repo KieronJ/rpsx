@@ -5,6 +5,7 @@ pub enum Exception {
     AddrStore = 5,
     Syscall = 8,
     Breakpoint = 9,
+    Reserved = 10,
     Overflow = 12,
 }
 
@@ -89,6 +90,7 @@ impl Cop0Status {
         self.coprocessor_usability[0]   = (value & 0x1000_0000) != 0;
         self.reverse_endianness         = (value & 0x0200_0000) != 0;
         self.bootstrap_exception_vector = (value & 0x0040_0000) != 0;
+        self.tlb_shutdown               = (value & 0x0020_0000) != 0;
         self.parity_error               = (value & 0x0010_0000) != 0;
         self.cache_miss                 = (value & 0x0008_0000) != 0;
         self.parity_zero                = (value & 0x0004_0000) != 0;
@@ -115,8 +117,7 @@ impl Cop0Status {
         self.interrupt_enable_current = false;
     }
 
-    pub fn leave_exception(&mut self)
-    {
+    pub fn leave_exception(&mut self) {
         self.kernel_user_current = self.kernel_user_previous;
         self.interrupt_enable_current = self.interrupt_enable_previous;
 
@@ -172,39 +173,42 @@ impl Cop0Cause {
 }
 
 pub struct Cop0 {
+    bad_vaddr: u32,
     status: Cop0Status,
     cause: Cop0Cause,
     epc: u32,
 }
 
 impl Cop0 {
-    pub fn new() -> Cop0
-    {
+    pub fn new() -> Cop0 {
         Cop0 {
+            bad_vaddr: 0,
             status: Cop0Status::new(),
             cause: Cop0Cause::new(),
             epc: 0,
         }
     }
 
-    pub fn reset(&mut self, epc: u32)
-    {
+    pub fn reset(&mut self, epc: u32) {
         self.status.reset();
         self.epc = epc;
     }
 
-    pub fn read(&self, index: usize) -> u32
-    {
+    pub fn read(&self, index: usize) -> u32 {
         match index {
+            6 => 0,
+            7 => 0,
+            8 => self.bad_vaddr,
+            9 => 0,
             12 => self.status.read(),
             13 => self.cause.read(),
             14 => self.epc,
+            15 => 0x0000_0002,
             _ => panic!("[COP0] [ERROR] Read from unimplemented Cop0 register {}", index)
         }   
     }
 
-    pub fn write(&mut self, index: usize, value: u32)
-    {
+    pub fn write(&mut self, index: usize, value: u32) {
         match index {
             3  => (),
             5  => (),
@@ -218,8 +222,7 @@ impl Cop0 {
         }
     }
 
-    pub fn enter_exception(&mut self, epc: u32, exception: Exception, bd: bool)
-    {
+    pub fn enter_exception(&mut self, epc: u32, exception: Exception, bd: bool) {
         self.epc = epc;
         self.status.enter_exception();
         self.cause.enter_exception(exception, bd);
@@ -231,6 +234,10 @@ impl Cop0 {
 
     pub fn exception_vectors(&self) -> bool {
         self.status.bootstrap_exception_vector
+    }
+
+    pub fn set_bad_vaddr(&mut self, value: u32) {
+        self.bad_vaddr = value;
     }
 
     pub fn iec(&self) -> bool {

@@ -39,7 +39,7 @@ impl Instruction {
     }
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, PartialEq)]
 pub enum Operation {
     Sll(usize, usize, usize),
     Srl(usize, usize, usize),
@@ -55,6 +55,7 @@ pub enum Operation {
     Mthi(usize),
     Mflo(usize),
     Mtlo(usize),
+    Mult(usize, usize),
     Multu(usize, usize),
     Div(usize, usize),
     Divu(usize, usize),
@@ -68,10 +69,7 @@ pub enum Operation {
     Nor(usize, usize, usize),
     Slt(usize, usize, usize),
     Sltu(usize, usize, usize),
-    Bltz(usize, u32),
-    Bgez(usize, u32),
-    Bltzal(usize, u32),
-    Bgezal(usize, u32),
+    Bcond(usize, usize, u32),
     J(u32),
     Jal(u32),
     Beq(usize, usize, u32),
@@ -89,13 +87,13 @@ pub enum Operation {
     Mfc0(usize, usize),
     Mtc0(usize, usize),
     Rfe,
-    Mfc2,
-    Cfc2,
-    Mtc2,
-    Ctc2,
+    Mfc2(usize, usize),
+    Cfc2(usize, usize),
+    Mtc2(usize, usize),
+    Ctc2(usize, usize),
     Bc2f,
     Bc2t,
-    Cop2,
+    Cop2(u32),
     Lb(usize, usize, u32),
     Lh(usize, usize, u32),
     Lwl(usize, usize, u32),
@@ -108,6 +106,8 @@ pub enum Operation {
     Swl(usize, usize, u32),
     Sw(usize, usize, u32),
     Swr(usize, usize, u32),
+    Lwc2(usize, usize, u32),
+    Swc2(usize, usize, u32),
     Unknown(u32),
 }
 
@@ -133,6 +133,7 @@ impl From<u32> for Operation {
                 0x11 => Mthi(i.rs()),
                 0x12 => Mflo(i.rd()),
                 0x13 => Mtlo(i.rs()),
+                0x18 => Mult(i.rs(), i.rt()),
                 0x19 => Multu(i.rs(), i.rt()),
                 0x1a => Div(i.rs(), i.rt()),
                 0x1b => Divu(i.rs(), i.rt()),
@@ -148,13 +149,7 @@ impl From<u32> for Operation {
                 0x2b => Sltu(i.rd(), i.rs(), i.rt()),
                 _ => Unknown(opcode),
             },
-            0x01 => match i.rt() {
-                0x00 => Bltz(i.rs(), i.imm_se()),
-                0x01 => Bgez(i.rs(), i.imm_se()),
-                0x10 => Bltzal(i.rs(), i.imm_se()),
-                0x11 => Bgezal(i.rs(), i.imm_se()),
-                _ => Unknown(opcode),
-            },
+            0x01 => Bcond(i.rs(), i.rt(), i.imm_se()),
             0x02 => J(i.target()),
             0x03 => Jal(i.target()),
             0x04 => Beq(i.rs(), i.rt(), i.imm_se()),
@@ -177,10 +172,10 @@ impl From<u32> for Operation {
             },
             0x12 => match i.rs() & 0x10 {
                 0x00 => match i.rs() & 0x0f {
-                    0x00 => Mfc2,
-                    0x02 => Cfc2,
-                    0x04 => Mtc2,
-                    0x06 => Ctc2,
+                    0x00 => Mfc2(i.rd(), i.rt()),
+                    0x02 => Cfc2(i.rd(), i.rt()),
+                    0x04 => Mtc2(i.rd(), i.rt()),
+                    0x06 => Ctc2(i.rd(), i.rt()),
                     0x08 => match i.rt() {
                         0x00 => Bc2f,
                         0x01 => Bc2t,
@@ -188,7 +183,7 @@ impl From<u32> for Operation {
                     }
                     _ => Unknown(opcode),
                 },
-                0x10 => Cop2,
+                0x10 => Cop2(i.target()),
                 _ => unreachable!(),
             }
             0x20 => Lb(i.rt(), i.rs(), i.imm_se()),
@@ -203,6 +198,8 @@ impl From<u32> for Operation {
             0x2a => Swl(i.rt(), i.rs(), i.imm_se()),
             0x2b => Sw(i.rt(), i.rs(), i.imm_se()),
             0x2e => Swr(i.rt(), i.rs(), i.imm_se()),
+            0x32 => Lwc2(i.rt(), i.rs(), i.imm_se()),
+            0x3a => Swc2(i.rt(), i.rs(), i.imm_se()),
             _ => Unknown(opcode),
         }
     }

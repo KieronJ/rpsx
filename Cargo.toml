@@ -7,3 +7,6 @@ license = "MIT"
 [dependencies]
 byteorder = "1.0.0"
 sdl2 = "0.31.0"
+
+[profile.release]
+debug = true

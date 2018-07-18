@@ -1,4 +1,7 @@
 /.vscode/
 /bios/
+/data/
+/exes/
+/games/
 /target/
 *.lock
