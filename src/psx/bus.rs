@@ -1,20 +1,18 @@
-use byteorder::{LittleEndian, ByteOrder};
+use byteorder::{ByteOrder, LittleEndian};
 
-use std::cell::RefCell;
-use std::rc::Rc;
-
-use util;
+use crate::util;
 
 use super::cdrom::Cdrom;
-use super::controller::Controller;
-use super::dma::{Direction, Dma, DmaPort, Step, SyncMode};
+use super::exp2::Exp2;
 use super::gpu::Gpu;
-use super::interrupt::{Interrupt, InterruptRegister};
-use super::joypad::Joypad;
+use super::intc::Intc;
+use super::peripherals::Peripherals;
 use super::mdec::Mdec;
 use super::spu::Spu;
-use super::timer::Timer;
+use super::timekeeper::{Device, Timekeeper};
+use super::timers::Timers;
 
+#[derive(PartialEq)]
 pub enum BusWidth {
     BYTE,
     HALF,
@@ -25,416 +23,356 @@ pub struct Bus {
     bios: Box<[u8]>,
     ram: Box<[u8]>,
     scratchpad: Box<[u8]>,
-    
+
     cdrom: Cdrom,
-    dma: Dma,
     gpu: Gpu,
-    joypad: Joypad,
     mdec: Mdec,
+    peripherals: Peripherals,
     spu: Spu,
 
-    istat: Rc<RefCell<InterruptRegister>>,
-    imask: InterruptRegister,
+    exp2: Exp2,
 
-    timer: Rc<RefCell<Timer>>,
+    intc: Intc,
+
+    timers: Timers,
 }
 
 impl Bus {
     pub fn new(bios_filepath: &str, game_filepath: &str) -> Bus {
-        let controller = Rc::new(RefCell::new(Controller::new()));
-        let istat = Rc::new(RefCell::new(InterruptRegister::new()));
-        let timer = Rc::new(RefCell::new(Timer::new(istat.clone())));
+        let mut bios = util::read_file_to_box(bios_filepath);
+
+        /* Enable TTY output */
+        bios[0x6f0c] = 0x01;
+        bios[0x6f0d] = 0x00;
+        bios[0x6f0e] = 0x01;
+        bios[0x6f0f] = 0x24;
+        bios[0x6f14] = 0xc0;
+        bios[0x6f15] = 0xa9;
+        bios[0x6f16] = 0x81;
+        bios[0x6f17] = 0xaf;
+
+        /* Fast boot */
+        //bios[0x18000] = 0x08;
+        //bios[0x18001] = 0x00;
+        //bios[0x18002] = 0xe0;
+        //bios[0x18003] = 0x03;
+        //bios[0x18004] = 0x00;
+        //bios[0x18005] = 0x00;
+        //bios[0x18006] = 0x00;
+        //bios[0x18007] = 0x00;
 
         Bus {
-            bios: util::read_file_to_box(bios_filepath),
+            bios: bios,
             ram: vec![0; 0x200000].into_boxed_slice(),
             scratchpad: vec![0; 0x400].into_boxed_slice(),
 
             cdrom: Cdrom::new(game_filepath),
-            dma: Dma::new(),
-            gpu: Gpu::new(controller.clone(), timer.clone()),
-            joypad: Joypad::new(controller),
+            gpu: Gpu::new(),
             mdec: Mdec::new(),
+            peripherals: Peripherals::new(),
             spu: Spu::new(),
 
-            istat: istat,
-            imask: InterruptRegister::new(),
+            exp2: Exp2::new(),
 
-            timer: timer,
+            intc: Intc::new(),
+
+            timers: Timers::new(),
         }
+    }
+
+    pub fn get_address(&self) -> u64 {
+        self as *const _ as u64
+    }
+
+    pub fn get_recompiler_store_word() -> u64 {
+        Self::recompiler_store_word as *const () as u64
+    }
+
+    pub fn reset(&mut self) {
+        self.cdrom.reset();
+        self.peripherals.reset();
+    }
+
+    pub fn ram(&mut self) -> &mut Box<[u8]> {
+        &mut self.ram
     }
 
     pub fn cdrom(&mut self) -> &mut Cdrom {
         &mut self.cdrom
     }
 
-    pub fn dma(&mut self) -> &mut Dma {
-        &mut self.dma
+    pub fn gpu(&self) -> &Gpu {
+        &self.gpu
     }
 
-    pub fn gpu(&mut self) -> &mut Gpu {
+    pub fn gpu_mut(&mut self) -> &mut Gpu {
         &mut self.gpu
     }
 
-    pub fn joypad(&mut self) -> &mut Joypad {
-        &mut self.joypad
+    pub fn mdec(&mut self) -> &mut Mdec {
+        &mut self.mdec
     }
 
-    pub fn tick_timers(&mut self, clocks: usize) {
-        let mut timer = self.timer.borrow_mut();
-
-        timer.tick0(clocks);
-        timer.tick1(clocks);
-        timer.tick2(clocks);
+    pub fn peripherals(&mut self) -> &mut Peripherals {
+        &mut self.peripherals
     }
 
-    pub fn check_interrupts(&self) -> bool {
-        let istat = self.istat.borrow();
-
-        (istat.read() & self.imask.read()) != 0
+    pub fn spu(&mut self) -> &mut Spu {
+        &mut self.spu
     }
 
-    pub fn set_interrupt(&mut self, interrupt: Interrupt) {
-        let mut istat = self.istat.borrow_mut();
-
-        istat.set_interrupt(interrupt);
+    pub fn intc(&mut self) -> &mut Intc {
+        &mut self.intc
     }
 
-    pub fn load(&mut self, address: u32, half: bool) -> u32 {
-        match address {
-            0x0000_0000...0x007f_ffff => LittleEndian::read_u32(&self.ram[(address & 0x1f_ffff) as usize..]),
-            0x1f00_0000...0x1f07_ffff => { 0xffff_ffff }, //println!("[MMU] [INFO] Load from EXPENSION_1 region address: 0x{:08x}", address); 0xffff_ffff },
-            0x1f80_0000...0x1f80_03ff => LittleEndian::read_u32(&self.scratchpad[(address - 0x1f80_0000) as usize..]),
+    pub fn tick_device_by_id(&mut self, device: Device, cycles: usize) {
+        let intc = &mut self.intc;
+
+        match device {
+            Device::Gpu => self.gpu.tick(intc, &mut self.timers, cycles),
+            Device::Cdrom => self.cdrom.tick(intc, &mut self.spu, cycles),
+            Device::Spu => for _ in 0..cycles {
+                self.spu.tick(intc);
+            },
+            Device::Timers => self.timers.tick(intc, cycles),
+            Device::Peripherals => self.peripherals.tick(intc, cycles),
+        };
+    }
+
+    pub unsafe fn load(&mut self, tk: &mut Timekeeper, width: BusWidth, address: u32) -> (u32, bool) {
+        let mut error = false;
+
+        let value = match address {
+            0x0000_0000...0x007f_ffff => {
+                let offset = (address & 0x1f_ffff) as usize;
+
+                match width {
+                    BusWidth::BYTE => *self.ram.get_unchecked(offset) as u32,
+                    BusWidth::HALF => {
+                        let slice = self.ram.get_unchecked(offset & !0x1..);
+                        LittleEndian::read_u16(slice) as u32
+                    },
+                    BusWidth::WORD => {
+                        let slice = self.ram.get_unchecked(offset & !0x3..);
+                        LittleEndian::read_u32(slice) as u32
+                    },
+                }
+            },
+            0x1f00_0000..=0x1f7f_ffff => 0xffff_ffff, //println!("[MMU] [INFO] Load from EXPENSION_1 region address: 0x{:08x}", address); 0xffff_ffff },
+            0x1f80_0000..=0x1f80_03ff => {
+                let offset = (address - 0x1f80_0000) as usize;
+
+                match width {
+                    BusWidth::BYTE => *self.scratchpad.get_unchecked(offset) as u32,
+                    BusWidth::HALF => {
+                        let slice = self.scratchpad.get_unchecked(offset & !0x1..);
+                        LittleEndian::read_u16(slice) as u32
+                    },
+                    BusWidth::WORD => {
+                        let slice = self.scratchpad.get_unchecked(offset & !0x3..);
+                        LittleEndian::read_u32(slice)
+                    },
+                }
+            },
             0x1f80_1014 => 0x2009_31e1,
             0x1f80_1060 => 0x0000_0b88,
-            0x1f80_1040 => self.joypad.rx_data(),
-            0x1f80_1044 => self.joypad.status(),
-            //0x1f80_1048 => self.joypad.read_mode(),
-            0x1f80_104a => self.joypad.read_control(),
-            0x1f80_104e => self.joypad.read_baud(),
-            0x1f80_1070 => self.istat.borrow().read(),
-            0x1f80_1074 => self.imask.read(),
-            0x1f80_1080...0x1f80_10ff => self.dma.read(address),
-            0x1f80_1100...0x1f80_112b => self.timer.borrow_mut().read(address),
-            0x1f80_1800...0x1f80_1803 => {
-                if address == 0x1f80_1802 && half {
+            0x1f80_1040 => {
+                tk.sync_device(self, Device::Peripherals);
+                self.peripherals.rx_data()
+            },
+            0x1f80_1044 => {
+                tk.sync_device(self, Device::Peripherals);
+                self.peripherals.status()
+            }
+            //0x1f80_1048 => {
+            //    tk.sync_device(self, Device::Gpu);
+            //    tk.sync_device(self, Device::Peripherals);
+            //    self.peripherals.read_mode()
+            //}
+            0x1f80_104a => {
+                tk.sync_device(self, Device::Peripherals);
+                self.peripherals.read_control()
+            }
+            0x1f80_104e => {
+                tk.sync_device(self, Device::Peripherals);
+                self.peripherals.read_baud()
+            }
+            0x1f80_1070 => self.intc.read_status(),
+            0x1f80_1074 => self.intc.read_mask(),
+            0x1f80_1100..=0x1f80_112b => {
+                tk.sync_device(self, Device::Timers);
+                self.timers.read(address)
+            }
+            0x1f80_1800..=0x1f80_1803 => {
+                tk.sync_device(self, Device::Cdrom);
+
+                if address == 0x1f80_1802 && width == BusWidth::HALF {
                     self.cdrom.read_data_half() as u32
                 } else {
                     self.cdrom.read(address) as u32
                 }
-            },
-            0x1f80_1810 => self.gpu.gpuread(),
-            0x1f80_1814 => self.gpu.gpustat(),
+            }
+            0x1f80_1810 => {
+                tk.sync_device(self, Device::Gpu);
+                self.gpu.gpuread()
+            }
+            0x1f80_1814 => {
+                tk.sync_device(self, Device::Gpu);
+                self.gpu.gpustat()
+            }
             0x1f80_1820 => self.mdec.read_data(),
             0x1f80_1824 => self.mdec.read_status(),
-            0x1f80_1c00...0x1f80_1fff => self.spu.read(address),
-            0x1fc0_0000...0x1fc7_ffff => LittleEndian::read_u32(&self.bios[address as usize - 0x1fc0_0000..]),
-            _ => panic!("[WARN] [ERROR] Load from unrecognised address 0x{:08x}", address),
+            0x1f80_1c00..=0x1f80_1fff => {
+                tk.sync_device(self, Device::Cdrom);
+                tk.sync_device(self, Device::Spu);
+
+                match width {
+                    BusWidth::BYTE => self.spu.read16(address & !0x1) as u32,
+                    BusWidth::HALF => self.spu.read16(address) as u32,
+                    BusWidth::WORD => self.spu.read32(address) as u32,
+                }
+            },
+            0x1f80_2000..=0x1f80_207f => self.exp2.read8(address) as u32,
+            0x1fc0_0000..=0x1fc7_ffff => {
+                let offset = (address - 0x1fc0_0000) as usize;
+
+                match width {
+                    BusWidth::BYTE => *self.bios.get_unchecked(offset) as u32,
+                    BusWidth::HALF => {
+                        let slice = self.bios.get_unchecked(offset & !0x1..);
+                        LittleEndian::read_u16(slice) as u32
+                    },
+                    BusWidth::WORD => {
+                        let slice = self.bios.get_unchecked(offset & !0x3..);
+                        LittleEndian::read_u32(slice) as u32
+                    },
+                }
+            },
+            _ => { error = true; 0 },
+        };
+
+        (value, error)
+    }
+
+    pub fn load_instruction(&mut self, address: u32) -> u32 {
+        if (address & 0x3) != 0 {
+            panic!("[RECOMPILER] [ERROR] Unaligned address: 0x{:08x}", address);
+        }
+    
+        match address {
+            0x0000_0000..=0x007f_ffff => {
+                let offset = (address & 0x1f_fffc) as usize;
+                LittleEndian::read_u32(&self.ram[offset..])
+            },
+            0x1f80_0000..=0x1f80_03ff => {
+                let offset = ((address - 0x1f80_0000) & !0x3) as usize;
+                LittleEndian::read_u32(&self.scratchpad[offset..])
+            },
+            0x1fc0_0000..=0x1fc7_ffff => {
+                let offset = (address as usize - 0x1fc0_0000) & !0x3;
+                LittleEndian::read_u32(&self.bios[offset..])
+            },
+            _ => panic!("[RECOMPILER] [ERROR] Unrecognised address: 0x{:08x}", address),
         }
     }
 
-    pub fn store(&mut self, width: BusWidth, address: u32, value: u32) {
-        use self::BusWidth::*;
+    pub unsafe fn store(&mut self, tk: &mut Timekeeper, width: BusWidth, address: u32, value: u32) -> bool {
+        let mut error = false;
 
         match address {
-            0x0000_0000...0x007f_ffff => {
-                let slice = &mut self.ram[(address & 0x1f_ffff) as usize..];
+            0x0000_0000..=0x007f_ffff => {
+                let offset = (address & 0x1f_ffff) as usize;
 
                 match width {
-                    BYTE => {
-                        slice[0] = value as u8;
-                    },
-
-                    HALF => {
+                    BusWidth::BYTE => *self.ram.get_unchecked_mut(offset) = value as u8,
+                    BusWidth::HALF => {
+                        let slice = self.ram.get_unchecked_mut(offset & !0x1..);
+                        LittleEndian::write_u16(slice, value as u16);
+                    }
+                    BusWidth::WORD => {
+                        let slice = self.ram.get_unchecked_mut(offset & !0x3..);
+                        LittleEndian::write_u32(slice, value);
+                    }
+                }
+            }
+            0x1f00_0000..=0x1f7f_ffff => (), //println!("[MMU] [INFO] Store to EXPENSION_1 region address: 0x{:08x}", address);
+            0x1f80_0000..=0x1f80_03ff => {
+                let offset = (address - 0x1f80_0000) as usize;
+                
+                match width {
+                    BusWidth::BYTE => *self.scratchpad.get_unchecked_mut(offset) = value as u8,
+                    BusWidth::HALF => {
+                        let slice = &mut self.scratchpad.get_unchecked_mut(offset & !0x1..);
                         LittleEndian::write_u16(slice, value as u16);
                     },
-
-                    WORD => {
+                    BusWidth::WORD => {
+                        let slice = &mut self.scratchpad.get_unchecked_mut(offset & !0x3..);
                         LittleEndian::write_u32(slice, value);
                     },
                 }
-            },
-            0x1f80_0000...0x1f80_03ff => {
-                let slice = &mut self.scratchpad[(address - 0x1f80_0000) as usize..];
-
-                match width {
-                    BYTE => {
-                        slice[0] = value as u8;
-                    },
-
-                    HALF => {
-                        LittleEndian::write_u16(slice, value as u16);
-                    },
-
-                    WORD => {
-                        LittleEndian::write_u32(slice, value);
-                    },
-                }
-            },
-            0x1f80_1000...0x1f80_1023 => (),//println!("[BUS] [INFO] Store to MEM_CTRL region address: 0x{:08x}", address),
-            0x1f80_1040 => self.joypad.tx_data(value),
-            0x1f80_1048 => self.joypad.write_mode(value as u16),
-            0x1f80_104a => self.joypad.write_control(value as u16),
-            0x1f80_104e => self.joypad.write_baud(value as u16),
-            0x1f80_1060 => (),//println!("[BUS] [INFO] Store to MEM_CTRL region address: 0x{:08x}", address),
-            0x1f80_1070 => {
-                let mut istat = self.istat.borrow_mut();
-
-                let status = istat.read();
-                istat.write(status & value);
-            },
-            0x1f80_1074 => self.imask.write(value),
-            0x1f80_1080...0x1f80_10ff => {
-                if let Some(port) = self.dma.write(address, value) {
-                    //println!("[DMA] [INFO] Executing DMA\nPort: {:?}", port);
-                    self.execute_dma(port);
-                }
-            },
-            0x1f80_1100...0x1f80_112b => self.timer.borrow_mut().write(address, value),
-            0x1f80_1800...0x1f80_1803 => self.cdrom.write(address, value as u8),
-            0x1f80_1810 => self.gpu.gp0_write(value),
-            0x1f80_1814 => self.gpu.execute_gp1_command(value),
+            }
+            0x1f80_1000..=0x1f80_1023 => (), //println!("[BUS] [INFO] Store to MEM_CTRL region address: 0x{:08x}", address),
+            0x1f80_1040 => {
+                tk.sync_device(self, Device::Gpu);
+                tk.sync_device(self, Device::Peripherals);
+                self.peripherals.tx_data(value)
+            }
+            0x1f80_1048 => {
+                tk.sync_device(self, Device::Gpu);
+                tk.sync_device(self, Device::Peripherals);
+                self.peripherals.write_mode(value as u16)
+            }
+            0x1f80_104a => {
+                tk.sync_device(self, Device::Gpu);
+                tk.sync_device(self, Device::Peripherals);
+                self.peripherals.write_control(value as u16)
+            }
+            0x1f80_104e => {
+                tk.sync_device(self, Device::Gpu);
+                tk.sync_device(self, Device::Peripherals);
+                self.peripherals.write_baud(value as u16)
+            }
+            0x1f80_1060 => (), //println!("[BUS] [INFO] Store to MEM_CTRL region address: 0x{:08x}", address),
+            0x1f80_1070 => self.intc.acknowledge_irq(value),
+            0x1f80_1074 => self.intc.write_mask(value),
+            0x1f80_1100..=0x1f80_112b => {
+                tk.sync_device(self, Device::Timers);
+                self.timers.write(address, value)
+            }
+            0x1f80_1800..=0x1f80_1803 => {
+                tk.sync_device(self, Device::Cdrom);
+                self.cdrom.write(address, value as u8)
+            }
+            0x1f80_1810 => {
+                tk.sync_device(self, Device::Gpu);
+                self.gpu.gp0_write(value)
+            }
+            0x1f80_1814 => {
+                tk.sync_device(self, Device::Gpu);
+                self.gpu.execute_gp1_command(value)
+            }
             0x1f80_1820 => self.mdec.write_command(value),
             0x1f80_1824 => self.mdec.write_control(value),
-            0x1f80_1c00...0x1f80_1fff => self.spu.write(address, value),
-            0x1f80_2000...0x1f80_207f => (), //println!("[BUS] [INFO] Store to EXPENSION_2 region address: 0x{:08x}", address),
-            0xfffe_0130 => (), //println!("[BUS] [INFO] Store to CACHE_CTRL region address: 0x{:08x}", address),
-            _ => panic!("[BUS] [ERROR] Store to unrecognised address 0x{:08x}", address),
-        };
-    }
+            0x1f80_1c00..=0x1f80_1fff => {
+                tk.sync_device(self, Device::Cdrom);
+                tk.sync_device(self, Device::Spu);
 
-    fn execute_dma(&mut self, port: DmaPort) {
-        let channel = self.dma.channel(port);
-        let sync = channel.sync();
-
-        match sync {
-            SyncMode::Manual => self.execute_dma_manual(port),
-            SyncMode::Request => self.execute_dma_request(port),
-            SyncMode::LinkedList => self.execute_dma_linked_list(port),
-        };
-
-        self.dma.finish_set_interrupt(port);
-    }
-
-    fn execute_dma_manual(&mut self, port: DmaPort) {
-        let channel = self.dma.channel_mut(port);
-
-        let mut address = channel.base_address() & 0x1f_fffc;
-        let mut remaining = channel.block_size();
-
-        let step = channel.step();
-        let direction = channel.direction();
-
-        match direction {
-            Direction::ToRam => {
-                match port {
-                    DmaPort::CDROM => {
-                        while remaining > 0 {
-                            let data = self.cdrom.data_dma();
-
-                            LittleEndian::write_u32(&mut self.ram[address as usize..], data);
-
-                            address = match step {
-                                Step::Forward => address.wrapping_add(4),
-                                Step::Backward => address.wrapping_sub(4),
-                            } & 0x1f_fffc;
-
-                            remaining -= 1;
-                        }
-                    },
-                    DmaPort::OTC => {
-                        while remaining > 0 {
-                            let value = match remaining {
-                                1 => 0xff_ffff,
-                                _ => address.wrapping_sub(4) & 0x1f_fffc,
-                            };
-
-                            LittleEndian::write_u32(&mut self.ram[address as usize..], value);
-
-                            address = value;
-                            remaining -= 1;
-                        }
-                    },
-                    _ => panic!("[DMA] [ERROR] Unsupported DMA Port {:?} for Manual", port),
-                };
+                match width {
+                    BusWidth::HALF => self.spu.write16(address, value as u16),
+                    _ => panic!("[BUS] [ERROR] Unsupported SPU width"),
+                }
             },
-            Direction::FromRam => {
-                match port {
-                    DmaPort::GPU => {
-                        while remaining > 0 {
-                            let data = LittleEndian::read_u32(&self.ram[address as usize..]);
-
-                            self.gpu.gp0_write(data);
-
-                            address = match step {
-                                Step::Forward => address.wrapping_add(4),
-                                Step::Backward => address.wrapping_sub(4),
-                            } & 0x1f_fffc;
-
-                            remaining -= 1;
-                        }
-                    },
-                    _ => panic!("[DMA] [ERROR] Unsupported DMA Port {:?} for Manual", port),
-                };
+            0x1f80_2000..=0x1f80_207f => self.exp2.write8(address, value as u8),
+            _ => {
+                error = true;
+                //println!("[BUS] [ERROR] Store to unrecognised address 0x{:08x}", address)
             },
         };
 
-        channel.finish();
-    }
-    
-    fn execute_dma_request(&mut self, port: DmaPort) {
-        let channel = self.dma.channel_mut(port);
-
-        let mut address = channel.base_address() & 0x1f_fffc;
-        let mut remaining = channel.block_amount() * channel.block_size();
-
-        let step = channel.step();
-        let direction = channel.direction();
-
-        match direction {
-            Direction::ToRam => {
-                match port {
-                    DmaPort::MDECOut => {
-                        while remaining > 0 {
-                            //TODO: Read data from MDEC.
-
-                            address = match step {
-                                Step::Forward => address.wrapping_add(4),
-                                Step::Backward => address.wrapping_sub(4),
-                            } & 0x1f_fffc;
-
-                            remaining -= 1;
-                        }
-                    }
-                    DmaPort::GPU => {
-                        while remaining > 0 {
-                            LittleEndian::write_u32(&mut self.ram[address as usize..], self.gpu.gpuread());
-
-                            address = match step {
-                                Step::Forward => address.wrapping_add(4),
-                                Step::Backward => address.wrapping_sub(4),
-                            } & 0x1f_fffc;
-
-                            remaining -= 1;
-                        }
-                    },
-                    _ => panic!("[DMA] [ERROR] Unsupported DMA Port {:?} for Request", port),
-                };
-            },
-            Direction::FromRam => {
-                match port {
-                    DmaPort::MDECIn => {
-                        while remaining > 0 {
-                            let data = LittleEndian::read_u32(&self.ram[address as usize..]);
-
-                            self.mdec.write_command(data);
-
-                            address = match step {
-                                Step::Forward => address.wrapping_add(4),
-                                Step::Backward => address.wrapping_sub(4),
-                            } & 0x1f_fffc;
-
-                            remaining -= 1;
-                        }
-                    },
-                    DmaPort::GPU => {
-                        while remaining > 0 {
-                            let data = LittleEndian::read_u32(&self.ram[address as usize..]);
-
-                            self.gpu.gp0_write(data);
-
-                            address = match step {
-                                Step::Forward => address.wrapping_add(4),
-                                Step::Backward => address.wrapping_sub(4),
-                            } & 0x1f_fffc;
-
-                            remaining -= 1;
-                        }
-                    },
-                    DmaPort::SPU => {
-                        while remaining > 0 {
-                            let data = LittleEndian::read_u32(&self.ram[address as usize..]);
-
-                            self.spu.dma_write(data);
-
-                            address = match step {
-                                Step::Forward => address.wrapping_add(4),
-                                Step::Backward => address.wrapping_sub(4),
-                            } & 0x1f_fffc;
-
-                            remaining -= 1;
-                        }
-                    },
-                    _ => panic!("[DMA] [ERROR] Unsupported DMA Port {:?} for Request", port),
-                };
-            },
-        };
-
-        channel.finish();
+        error
     }
 
-    fn execute_dma_linked_list(&mut self, port: DmaPort) {
-        let channel = self.dma.channel_mut(port);
-
-        let mut address = channel.base_address() & 0x1f_fffc;
-
-        let direction = channel.direction();
-
-        match direction {
-            Direction::ToRam => panic!("[DMA] [ERROR] Unsupported DMA Direction for LinkedList {:?}", direction),
-            Direction::FromRam => {
-                match port {
-                    DmaPort::GPU => {
-                        loop {
-                            let header = LittleEndian::read_u32(&self.ram[address as usize..]);
-
-                            let mut payload_length = header >> 24;
-
-                            for _ in 0..payload_length {
-                                address = (address + 4) & 0x1f_fffc;
-
-                                let command = LittleEndian::read_u32(&self.ram[address as usize..]);
-                                self.gpu.gp0_write(command);
-                            }
-
-                            if (header & 0x80_0000) != 0 {
-                                break;
-                            }
-
-                            address = header & 0x1f_fffc;
-                        }
-                    },
-                    _ => panic!("[DMA] [ERROR] Unsupported DMA Port {:?} for LinkedList", port),
-                };
-            },
-        };
-
-        channel.finish();
-    }
-
-    fn debug_fetch(&self, address: u32) -> Result<u32, ()> {
-        match address {
-            0x0000_0000...0x0020_0000 => Ok(LittleEndian::read_u32(&self.ram[address as usize..])),
-            0x1fc0_0000...0x1fc8_0000 => Ok(LittleEndian::read_u32(&self.bios[address as usize - 0x1fc0_0000..])),
-            _ => Err(()),
-        }
-    }
-
-    pub fn debug_load(&self, width: BusWidth, address: u32) -> Result<u32, ()> {
-        use self::BusWidth::*;
-
-        let mask = match width {
-            BYTE => 0x0000_00ff,
-            HALF => 0x0000_ffff,
-            WORD => 0xffff_ffff,
-        };
-
-        let fetch = self.debug_fetch(address);
-
-        if fetch.is_ok() {
-            Ok(fetch.unwrap() & mask)
-        } else {
-            Err(())
-        }
+    pub fn recompiler_store_word(&mut self, address: u32, value: u32) {
+        
     }
 }

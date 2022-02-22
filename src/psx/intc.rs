@@ -1,3 +1,4 @@
+#[derive(Debug, PartialEq)]
 pub enum Interrupt {
     Vblank,
     Gpu,
@@ -13,7 +14,7 @@ pub enum Interrupt {
 }
 
 impl Interrupt {
-    pub fn to_u32(interrupt: Interrupt) -> u32 {
+    pub fn to_u32(interrupt: &Interrupt) -> u32 {
         use self::Interrupt::*;
 
         match interrupt {
@@ -32,7 +33,7 @@ impl Interrupt {
     }
 }
 
-pub struct InterruptRegister {
+struct InterruptRegister {
     pio: bool,
     spu: bool,
     sio: bool,
@@ -94,10 +95,61 @@ impl InterruptRegister {
         self.gpu = (value & 0x2) != 0;
         self.vblank = (value & 0x1) != 0;
     }
-
-    pub fn set_interrupt(&mut self, interrupt: Interrupt) {
-        let status = self.read();
-        self.write(status | Interrupt::to_u32(interrupt));
-    }
 }
 
+pub struct Intc {
+    status: InterruptRegister,
+    mask: InterruptRegister,
+
+    pending: bool,
+}
+
+impl Intc {
+    pub fn new() -> Intc {
+        Intc {
+            status: InterruptRegister::new(),
+            mask: InterruptRegister::new(),
+
+            pending: false,
+        }
+    }
+
+    pub fn pending(&self) -> bool {
+        self.pending
+    }
+
+    fn update_pending(&mut self) {
+        let status = self.status.read();
+        let mask = self.mask.read();
+
+        self.pending = (status & mask) != 0;
+    }
+
+    pub fn assert_irq(&mut self, interrupt: Interrupt) {
+        let status = self.status.read();
+        self.status.write(status | Interrupt::to_u32(&interrupt));
+
+        self.update_pending();
+    }
+
+    pub fn read_status(&self) -> u32 {
+        self.status.read()
+    }
+
+    pub fn acknowledge_irq(&mut self, value: u32) {
+        let status = self.status.read();
+        self.status.write(status & value);
+
+        self.update_pending();
+    }
+
+    pub fn read_mask(&self) -> u32 {
+        self.mask.read()
+    }
+
+    pub fn write_mask(&mut self, value: u32) {
+        self.mask.write(value);
+
+        self.update_pending();
+    }
+}

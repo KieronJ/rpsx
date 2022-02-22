@@ -1,0 +1,12 @@
+name: rpsx
+version: "0.1.0"
+author: Kieron Josephs <kieron.josephs00@gmail.com>
+about: A PlayStation emulator written in Rust
+args:
+    - BIOS:
+        help: Path to BIOS file
+        required: true
+
+    - GAME:
+        help: Path to game file
+        required: true

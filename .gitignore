@@ -1,7 +1,8 @@
-/.vscode/
-/bios/
-/data/
-/exes/
-/games/
-/target/
+.vs/
+.vscode/
+bios/
+cards/
+games/
+target/
+*.ini
 *.lock

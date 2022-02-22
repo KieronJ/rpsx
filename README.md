@@ -1,17 +1,31 @@
 # rpsx
-A simple PlayStation emulator in Rust.
+A PlayStation emulator written in Rust as a hobby project.
 
-The emulator will not boot many games presently, but it is able to run Crash Bandicoot albeit with timing issues.
+Most components of the PlayStation are implemented, and many popular games are playable.
 
 # Screenshots
-Boot Screen
 
-![alt text](https://raw.githubusercontent.com/kieronj/rpsx/master/screenshots/boot_screen.png)
+<p align="middle">
+    <img src="screenshots/crash_team_racing.jpg" width="320" height="256" />
+    <img src="screenshots/crash2.jpg" width="320" height="256" />
+</p>
 
+<p align="middle">
+    <img src="screenshots/final_fantasy_vii.jpg" width="320" height="256" />
+    <img src="screenshots/metal_gear_solid.jpg" width="320" height="256" />
+</p>
 
-Crash Bandicoot
+<p align="middle">
+    <img src="screenshots/pacman_world.jpg "width="320" height="256" />
+	<img src="screenshots/ridge_racer.jpg "width="320" height="256" />
+</p>
 
-![alt text](https://raw.githubusercontent.com/kieronj/rpsx/master/screenshots/crash_bandicoot.png)
+<p align="middle">
+    <img src="screenshots/silent_hill.jpg" width="320" height="256" />
+    <img src="screenshots/spyro.jpg" width="320" height="256" />
+</p>
 
-# License
-This project is licensed under the MIT license.
+<p align="middle">
+    <img src="screenshots/tekken3.jpg" width="320" height="256" />
+    <img src="screenshots/wu_tang.jpg" width="320" height="256" />
+</p>

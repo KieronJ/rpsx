@@ -1,42 +1,31 @@
-use std::cell::RefCell;
 use std::cmp;
-use std::mem;
-use std::rc::Rc;
+use std::fs::File;
+use std::io::Write;
 
-use byteorder::{LittleEndian, ByteOrder};
+use byteorder::{ByteOrder, LittleEndian};
 
-use queue::Queue;
+use crate::gpu_viewer::{GpuCommand, GpuFrame, GpuPolygon};
+use crate::util;
 
-use super::controller::Controller;
-use super::display::Display;
-use super::rasteriser::{Colour, Vector2i, Vector3f};
-use super::timer::Timer;
+use super::intc::{Intc, Interrupt};
+use super::rasteriser::{Colour, Vector2i, Vector3i};
+use super::timers::Timers;
 
-pub const DITHER_TABLE: [isize; 16] = [-4,  0, -3,  1,
-                                        2, -2,  3, -1,
-                                       -3,  1, -4,  0,
-                                        3, -1,  2, -2];
+pub const DITHER_TABLE: [i32; 16] = [-4, 0, -3, 1, 2, -2, 3, -1, -3, 1, -4, 0, 3, -1, 2, -2];
 
 pub const CMD_SIZE: [usize; 256] = [
-    1, 1, 3, 1, 1, 1, 1, 1, 1, 1, 1, 1,  1,  1,  1,  1,
-    1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,  1,  1,  1,  1,
-    4, 4, 4, 4, 7, 7, 7, 7, 5, 5, 5, 5,  9,  9,  9,  9,
-    6, 6, 6, 6, 9, 9, 9, 9, 8, 8, 8, 8, 12, 12, 12, 12,
-    3, 1, 3, 1, 1, 1, 1, 1, 1, 1, 1, 1,  1,  1,  1,  1,
-    4, 1, 4, 1, 1, 1, 1, 1, 1, 1, 1, 1,  1,  1,  1,  1,
-    3, 1, 3, 1, 4, 4, 4, 4, 2, 1, 2, 1,  3,  3,  3,  3,
-    2, 1, 2, 1, 3, 3, 3, 3, 2, 1, 2, 1,  3,  3,  3,  3,
-    4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4,  4,  4,  4,  4,
-    4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4,  4,  4,  4,  4,
-    3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3,  3,  3,  3,  3,
-    3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3,  3,  3,  3,  3,
-    3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3,  3,  3,  3,  3,
-    3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3,  3,  3,  3,  3,
-    1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,  1,  1,  1,  1,
-    1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,  1,  1,  1,  1,
+    1, 1, 3, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+    4, 4, 4, 4, 7, 7, 7, 7, 5, 5, 5, 5, 9, 9, 9, 9, 6, 6, 6, 6, 9, 9, 9, 9, 8, 8, 8, 8, 12, 12, 12,
+    12, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4,
+    4, 4, 3, 1, 3, 1, 4, 4, 4, 4, 2, 1, 2, 1, 3, 3, 3, 3, 2, 1, 2, 1, 3, 3, 3, 3, 2, 1, 2, 1, 3, 3,
+    3, 3, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4,
+    4, 4, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3,
+    3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3,
+    3, 3, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+    1, 1,
 ];
 
-struct GpuTransfer {
+struct Transfer {
     x: u32,
     y: u32,
     w: u32,
@@ -48,9 +37,9 @@ struct GpuTransfer {
     active: bool,
 }
 
-impl GpuTransfer {
-    pub fn new() -> GpuTransfer {
-        GpuTransfer {
+impl Transfer {
+    pub fn new() -> Transfer {
+        Transfer {
             x: 0,
             y: 0,
             w: 0,
@@ -72,7 +61,7 @@ enum DmaDirection {
     GpureadToCpu,
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, PartialEq)]
 enum TexturePageColours {
     TP4Bit,
     TP8Bit,
@@ -89,7 +78,7 @@ enum SemiTransparency {
 }
 
 #[derive(Clone, Copy)]
-struct GpuTexpage {
+pub struct Texpage {
     flip_y: bool,
     flip_x: bool,
     texture_disable: bool,
@@ -101,9 +90,9 @@ struct GpuTexpage {
     x_base: u32,
 }
 
-impl GpuTexpage {
-    pub fn new() -> GpuTexpage {
-        GpuTexpage {
+impl Texpage {
+    pub fn new() -> Texpage {
+        Texpage {
             flip_y: false,
             flip_x: false,
             texture_disable: false,
@@ -116,10 +105,10 @@ impl GpuTexpage {
         }
     }
 
-    pub fn from_u32(value: u32) -> GpuTexpage {
+    pub fn from_u32(value: u32) -> Texpage {
         let texpage = value >> 16;
 
-        GpuTexpage {
+        Texpage {
             flip_y: (texpage & 0x2000) != 0,
             flip_x: (texpage & 0x1000) != 0,
             texture_disable: (texpage & 0x800) != 0,
@@ -145,24 +134,42 @@ impl GpuTexpage {
     }
 }
 
-pub struct Gpu {
-    display: Display,
-    timer: Rc<RefCell<Timer>>,
+#[derive(Clone, Copy)]
+struct CacheEntry {
+    tag: isize,
+    data: [u8; 8],
+}
 
+impl CacheEntry {
+    pub fn new() -> CacheEntry {
+        CacheEntry {
+            tag: -1,
+            data: [0; 8],
+        }
+    }
+}
+
+pub struct Gpu {
     vram: Box<[u8]>,
+    texture_cache: [CacheEntry; 256],
+    clut_cache: [u16; 256],
+    clut_cache_tag: isize,
 
     scanline: usize,
     video_cycle: usize,
+    lines: usize,
 
     dotclock_cycle: usize,
 
     gpuread: u32,
 
-    command_buffer: Queue<u32>,
+    command_buffer: [u32; 16],
+    command_buffer_index: usize,
+
     command_words_remaining: usize,
 
-    cpu_to_gpu_transfer: GpuTransfer,
-    gpu_to_cpu_transfer: GpuTransfer,
+    cpu_to_gpu_transfer: Transfer,
+    gpu_to_cpu_transfer: Transfer,
 
     interlace_line: bool,
     dma_direction: DmaDirection,
@@ -171,12 +178,11 @@ pub struct Gpu {
     vram_ready: bool,
     cmd_ready: bool,
 
-    //TODO: DMA/Data Request
-
     irq: bool,
 
     display_disable: bool,
     vertical_interlace: bool,
+    interlace_field: bool,
     colour_depth: bool,
     video_mode: bool,
 
@@ -188,27 +194,36 @@ pub struct Gpu {
     skip_masked_pixels: bool,
     set_mask_bit: bool,
 
-    texpage: GpuTexpage,
+    texpage: Texpage,
+
+    command_tpx: u32,
+    command_tpy: u32,
+    command_depth: TexturePageColours,
+    command_clut_x: i32,
+    command_clut_y: i32,
 
     rectangle: bool,
+    line: bool,
+    polyline: bool,
+    polyline_coord: Vector2i,
+    polyline_colour: Colour,
+    polyline_remaining: usize,
 
     shaded: bool,
     semi_tranparent: bool,
-    blending: bool,
-    textured: bool,
 
     drawing_begin: u32,
-    drawing_x_begin: u32,
-    drawing_y_begin: u32,
+    drawing_x_begin: i32,
+    drawing_y_begin: i32,
 
     drawing_end: u32,
-    drawing_x_end: u32,
-    drawing_y_end: u32,
+    drawing_x_end: i32,
+    drawing_y_end: i32,
 
     drawing_offset: u32,
     drawing_x_offset: i32,
     drawing_y_offset: i32,
-    
+
     texture_window: u32,
     texture_window_mask_x: u32,
     texture_window_mask_y: u32,
@@ -223,28 +238,34 @@ pub struct Gpu {
 
     vertical_display_start: u32,
     vertical_display_end: u32,
+
+    frame: GpuFrame,
+    frame_complete: bool,
 }
 
 impl Gpu {
-    pub fn new(controller: Rc<RefCell<Controller>>, timer: Rc<RefCell<Timer>>) -> Gpu {
+    pub fn new() -> Gpu {
         Gpu {
-            display: Display::new(1280, 960, "rpsx", controller),
-            timer: timer,
-
             vram: vec![0; 0x100000].into_boxed_slice(),
+            texture_cache: [CacheEntry::new(); 256],
+            clut_cache: [0; 256],
+            clut_cache_tag: -1,
 
             scanline: 0,
             video_cycle: 0,
+            lines: 263,
 
             dotclock_cycle: 0,
 
             gpuread: 0,
 
-            command_buffer: Queue::<u32>::new(16),
+            command_buffer: [0; 16],
+            command_buffer_index: 0,
+
             command_words_remaining: 0,
 
-            cpu_to_gpu_transfer: GpuTransfer::new(),
-            gpu_to_cpu_transfer: GpuTransfer::new(),
+            cpu_to_gpu_transfer: Transfer::new(),
+            gpu_to_cpu_transfer: Transfer::new(),
 
             interlace_line: false,
             dma_direction: DmaDirection::Off,
@@ -253,12 +274,11 @@ impl Gpu {
             vram_ready: true,
             cmd_ready: true,
 
-            //TODO: DMA/Data Request
-
             irq: false,
 
             display_disable: false,
             vertical_interlace: false,
+            interlace_field: false,
             colour_depth: false,
             video_mode: false,
 
@@ -270,14 +290,23 @@ impl Gpu {
             skip_masked_pixels: false,
             set_mask_bit: false,
 
-            texpage: GpuTexpage::new(),
+            texpage: Texpage::new(),
+
+            command_tpx: 0,
+            command_tpy: 0,
+            command_depth: TexturePageColours::TP4Bit,
+            command_clut_x: 0,
+            command_clut_y: 0,
 
             rectangle: false,
+            line: false,
+            polyline: false,
+            polyline_coord: Vector2i::new(0, 0),
+            polyline_colour: Colour::from_u32(0),
+            polyline_remaining: 0,
 
             shaded: false,
             semi_tranparent: false,
-            blending: false,
-            textured: false,
 
             drawing_begin: 0,
             drawing_x_begin: 0,
@@ -305,69 +334,82 @@ impl Gpu {
 
             vertical_display_start: 16,
             vertical_display_end: 256,
+
+            frame: GpuFrame::new(),
+            frame_complete: false,
         }
     }
 
-    pub fn tick(&mut self, clocks: usize) -> bool {
+    pub fn tick(&mut self, intc: &mut Intc, timers: &mut Timers, clocks: usize) {
         let cycles = self.horizontal_length();
-        let scanlines = self.vertical_length();
         let dotclock = self.get_dotclock() as usize;
-
-        let mut irq = false;
-
-        self.video_cycle += clocks;
-        self.dotclock_cycle += clocks;
-
-        {
-            let mut timer = self.timer.borrow_mut();
-            timer.tick_dotclock(self.dotclock_cycle / dotclock);
-        }
-
-        self.dotclock_cycle %= dotclock;
 
         let old_hblank = self.in_hblank();
         let old_vblank = self.in_vblank();
 
+        self.video_cycle += clocks;
+        self.dotclock_cycle += clocks;
+
+        timers.tick_dotclock(intc, self.dotclock_cycle / dotclock);
+
+        self.dotclock_cycle %= dotclock;
+
         if self.video_cycle >= cycles {
             self.video_cycle -= cycles;
 
+            timers.tick_hblank(intc);
+
+            if self.vres == 240 && self.vertical_interlace {
+                self.interlace_line = !self.interlace_line;
+            }
+
             self.scanline += 1;
-            if self.scanline >= scanlines {
+
+            if self.scanline == (self.lines - 20) {
+                self.frame_complete = true;
+                intc.assert_irq(Interrupt::Vblank);
+            }
+
+            if self.scanline == self.lines {
+                if self.lines == 263 {
+                    self.lines = 262;
+                } else {
+                    self.lines = 263;
+                }
+
                 self.scanline = 0;
 
-                self.render_frame();
-                irq = true;
+                if self.vres == 480 && self.vertical_interlace {
+                    self.interlace_line = !self.interlace_line;
+                }
+
+                self.interlace_field = !self.interlace_field;
             }
         }
 
-        let mut timer = self.timer.borrow_mut();
-
         if self.in_hblank() {
             if !old_hblank {
-                timer.set_hblank(true);
-                timer.tick_hblank();
+                timers.set_hblank(true);
             }
         } else {
             if old_hblank {
-                timer.set_hblank(false);
+                timers.set_hblank(false);
             }
         }
 
         if self.in_vblank() {
             if !old_vblank {
-                timer.set_vblank(true);
+                timers.set_vblank(true);
             }
         } else {
             if old_vblank {
-                timer.set_vblank(false);
+                timers.set_vblank(false);
             }
         }
 
-        irq
-    }
-
-    pub fn irq(&self) -> bool {
-        self.irq
+        if self.irq {
+            intc.assert_irq(Interrupt::Gpu);
+        }
     }
 
     fn horizontal_length(&self) -> usize {
@@ -377,21 +419,13 @@ impl Gpu {
         }
     }
 
-    fn vertical_length(&self) -> usize {
-        match self.video_mode {
-            true => 314,
-            false => 263,
-        }
-    }
-
     pub fn in_hblank(&self) -> bool {
-        self.video_cycle < self.horizontal_display_start as usize ||
-        self.video_cycle > self.horizontal_display_end as usize
+        self.video_cycle < self.horizontal_display_start as usize
+            || self.video_cycle >= self.horizontal_display_end as usize
     }
 
     pub fn in_vblank(&self) -> bool {
-        self.scanline < self.vertical_display_start as usize ||
-        self.scanline > self.vertical_display_end as usize
+        self.scanline >= (self.lines - 20)
     }
 
     pub fn get_dotclock(&self) -> u32 {
@@ -400,23 +434,106 @@ impl Gpu {
             640 => 4,
             256 => 10,
             512 => 5,
-            368 => 6,
+            368 => 7,
             _ => unreachable!(),
         }
     }
 
-    fn dither_get_offset(x: usize, y: usize) -> isize {
-        DITHER_TABLE[(x & 0x3) + (y & 0x3) * 4]
+    pub fn get_24bit(&self) -> bool {
+        self.colour_depth
     }
 
-    fn render_frame(&mut self) {
-        let start_x = self.display_area_x as usize;
-        let start_y = self.display_area_y as usize;
+    pub fn get_display_origin(&self) -> (u32, u32) {
+        (self.display_area_x, self.display_area_y)
+    }
 
-        let start_address = 2 * (start_x + start_y * 1024);
+    pub fn get_display_size(&self) -> (u32, u32) {
+        let xstart = self.horizontal_display_start;
+        let xend = self.horizontal_display_end;
+        let dotclock = self.get_dotclock();
 
-        self.display.draw(&self.vram[start_address..]);
-        self.display.handle_events();
+        let ystart = self.vertical_display_start;
+        let yend = self.vertical_display_end;
+
+        let xdiff;
+
+        if xstart <= xend {
+            xdiff = xend - xstart;
+        } else {
+            xdiff = 50;
+        }
+
+        let x = ((xdiff / dotclock) + 2) & !0x3;
+        let mut y = yend - ystart;
+
+        if self.vertical_interlace {
+            y <<= 1;
+        }
+
+        (x, y)
+    }
+
+    pub fn get_framebuffer(&self,
+                           framebuffer: &mut [u8],
+                           draw_full_vram: bool) {
+
+        let (xs, ys) = if draw_full_vram {
+            (0, 0)
+        } else {
+            self.get_display_origin()
+        };
+
+        let (w, h) = if draw_full_vram {
+            (1024, 512)
+        } else {
+            self.get_display_size()
+        };
+
+        let mut framebuffer_address = 0;
+
+        for y in ys..ys + h {
+            for x in xs..xs + w {
+                let address = match !draw_full_vram && self.colour_depth {
+                    true => Gpu::vram_address_24bit(x, y),
+                    false => Gpu::vram_address(x, y),
+                };
+
+                let col;
+
+                if !draw_full_vram && self.colour_depth {
+                    let r = self.vram[address];
+                    let g = self.vram[address + 1];
+                    let b = self.vram[address + 2];
+                    col = Colour::new(r, g, b, false);
+                } else {
+                    let colour = LittleEndian::read_u16(&self.vram[address..]);
+                    col = Colour::from_u16(colour);
+                }
+
+                framebuffer[framebuffer_address] = col.r;
+                framebuffer[framebuffer_address + 1] = col.g;
+                framebuffer[framebuffer_address + 2] = col.b;
+                framebuffer_address += 3;
+            }
+        }
+    }
+
+    pub fn get_frame_data(&mut self) -> &mut GpuFrame {
+        &mut self.frame
+    }
+
+    pub fn dump_vram(&self) {
+        let mut file = File::create("vram.bin").unwrap();
+        file.write_all(&self.vram).unwrap();
+    }
+
+    pub fn frame_complete(&mut self) -> bool {
+        if self.frame_complete {
+            self.frame_complete = false;
+            return true;
+        }
+
+        false
     }
 
     pub fn gpuread(&mut self) -> u32 {
@@ -433,12 +550,22 @@ impl Gpu {
     pub fn gpustat(&mut self) -> u32 {
         let mut value = 0;
 
-        value |= (self.interlace_line as u32) << 31;
+        let interlace_line = match self.in_vblank() {
+            true => false,
+            false => self.interlace_line,
+        };
+
+        value |= (interlace_line as u32) << 31;
         value |= (self.dma_direction as u32) << 29;
         value |= (self.dma_ready as u32) << 28;
         value |= (self.vram_ready as u32) << 27;
         value |= (self.cmd_ready as u32) << 26;
-        // TODO: DMA / Data Request
+        value |= match self.dma_direction {
+            DmaDirection::Off => 0,
+            DmaDirection::Fifo => 1,
+            DmaDirection::CpuToGp0 => self.dma_ready as u32,
+            DmaDirection::GpureadToCpu => self.vram_ready as u32,
+        } << 25;
         value |= (self.irq as u32) << 24;
         value |= (self.display_disable as u32) << 23;
         value |= (self.vertical_interlace as u32) << 22;
@@ -456,10 +583,13 @@ impl Gpu {
             640 => 0x06,
             368 => 0x01,
             _ => unreachable!(),
-        };
+        } << 16;
         value |= (self.texpage.texture_disable as u32) << 15;
         value |= (self.reverse as u32) << 14;
-        value |= (self.vertical_interlace as u32) << 13;
+        value |= match self.vertical_interlace {
+            true => self.interlace_field as u32,
+            false => 1,
+        } << 13;
         value |= (self.skip_masked_pixels as u32) << 12;
         value |= (self.set_mask_bit as u32) << 11;
         value |= (self.texpage.display_area_enable as u32) << 10;
@@ -469,15 +599,54 @@ impl Gpu {
         value |= self.texpage.y_base / 16;
         value |= self.texpage.x_base / 64;
 
-        self.interlace_line = !self.interlace_line;
-
         value
     }
 
     pub fn gp0_write(&mut self, word: u32) {
         if self.cpu_to_gpu_transfer.active {
             self.vram_write_transfer(word as u16);
-            self.vram_write_transfer((word >> 16) as u16);
+
+            if self.cpu_to_gpu_transfer.active {
+                self.vram_write_transfer((word >> 16) as u16);
+            }
+
+            return;
+        }
+
+        if self.polyline {
+            if (word & 0x50005000) == 0x50005000 {
+                self.polyline = false;
+                return;
+            }
+
+            self.command_buffer[self.command_buffer_index] = word;
+            self.command_buffer_index += 1;
+
+            self.polyline_remaining -= 1;
+
+            if self.polyline_remaining == 0 {
+                let mut coords = [self.polyline_coord; 2];
+                let mut colours = [self.polyline_colour; 2];
+
+                if self.shaded {
+                    colours[1] = Colour::from_u32(self.command_buffer[0]);
+                }
+
+                let coord2 = self.command_buffer[1];
+                //coords[1] = self.get_coord(coord2);
+
+                //self.rasterise_line(coords, colours);
+
+                self.polyline_coord = coords[1];
+                self.polyline_colour = colours[1];
+
+                self.polyline_remaining = match self.shaded {
+                    false => 1,
+                    true => 2,
+                };
+
+                self.command_buffer_index = 0;
+            }
 
             return;
         }
@@ -486,7 +655,11 @@ impl Gpu {
     }
 
     fn vram_address(x: u32, y: u32) -> usize {
-        2 * (x + y * 1024) as usize
+        2 * ((x & 0x3ff) + 1024 * (y & 0x1ff)) as usize
+    }
+
+    fn vram_address_24bit(x: u32, y: u32) -> usize {
+        (3 * (x & 0x3ff) + 2048 * (y & 0x1ff)) as usize
     }
 
     fn vram_read_transfer(&mut self) -> u16 {
@@ -497,7 +670,7 @@ impl Gpu {
 
         if self.gpu_to_cpu_transfer.rx == self.gpu_to_cpu_transfer.w {
             self.gpu_to_cpu_transfer.rx = 0;
-            
+
             self.gpu_to_cpu_transfer.ry += 1;
 
             if self.gpu_to_cpu_transfer.ry == self.gpu_to_cpu_transfer.h {
@@ -507,22 +680,21 @@ impl Gpu {
             }
         }
 
-        let destination_address = Gpu::vram_address(x & 0x3ff, y & 0x1ff);
+        let destination_address = Gpu::vram_address(x, y);
         LittleEndian::read_u16(&self.vram[destination_address..])
     }
 
-    fn vram_write_transfer(&mut self, data: u16) {
+    fn vram_write_transfer(&mut self, mut data: u16) {
         let x = self.cpu_to_gpu_transfer.x + self.cpu_to_gpu_transfer.rx;
         let y = self.cpu_to_gpu_transfer.y + self.cpu_to_gpu_transfer.ry;
 
         let destination_address = Gpu::vram_address(x & 0x3ff, y & 0x1ff);
-        LittleEndian::write_u16(&mut self.vram[destination_address..], data);
 
         self.cpu_to_gpu_transfer.rx += 1;
 
         if self.cpu_to_gpu_transfer.rx == self.cpu_to_gpu_transfer.w {
             self.cpu_to_gpu_transfer.rx = 0;
-            
+
             self.cpu_to_gpu_transfer.ry += 1;
 
             if self.cpu_to_gpu_transfer.ry == self.cpu_to_gpu_transfer.h {
@@ -530,14 +702,29 @@ impl Gpu {
                 self.cpu_to_gpu_transfer.active = false;
             }
         }
+
+        if self.skip_masked_pixels {
+            let prev = LittleEndian::read_u16(&self.vram[destination_address..]);
+
+            if (prev & 0x8000) != 0 {
+                return;
+            }
+        }
+
+        if self.set_mask_bit {
+            data |= 0x8000;
+        }
+
+        LittleEndian::write_u16(&mut self.vram[destination_address..], data);
     }
 
     fn push_gp0_command(&mut self, command_word: u32) {
-        if !self.command_buffer.full() {
-            self.command_buffer.push(command_word);
+        if self.command_buffer_index < 16 {
+            self.command_buffer[self.command_buffer_index] = command_word;
+            self.command_buffer_index += 1;
         }
 
-        if self.command_buffer.full() {
+        if self.command_buffer_index >= 16 {
             self.cmd_ready = false;
         }
 
@@ -545,79 +732,94 @@ impl Gpu {
             let command = (command_word >> 24) as usize;
             self.command_words_remaining = CMD_SIZE[command];
         }
-        
+
         if self.command_words_remaining == 1 {
             self.execute_gp0_command();
+            self.command_buffer_index = 0;
         }
 
         self.command_words_remaining -= 1;
     }
 
     fn execute_gp0_command(&mut self) {
-        let command_word = self.command_buffer.pop();
+        let command_word = self.command_buffer[0];
         let command = command_word >> 24;
 
         match command {
-            0x00 => {}, // NOP
-            0x01 => {
-                // TODO: Clear Cache
-            },
+            0x00 => {} // NOP
+            0x01 => self.invalidate_cache(),
             0x02 => {
-                let destination = self.command_buffer.pop();
-                let size = self.command_buffer.pop();
+                let destination = self.command_buffer[1];
+                let size = self.command_buffer[2];
 
                 let colour = Colour::from_u32(command_word);
                 let pixel = colour.to_u16();
 
                 let x_start = destination & 0x3f0;
-                let y_start = (destination >> 16) & 0x1ff;
-                
-                let w = ((size & 0x3f0) + 0xf) & !0xf;
+                let y_start = (destination >> 16) & 0x3ff;
+
+                let w = ((size & 0x3ff) + 0xf) & !0xf;
                 let h = (size >> 16) & 0x1ff;
 
-                let x_end = x_start + w;
-                let y_end = y_start + h;
-
-                for y in y_start..y_end {
-                    for x in x_start..x_end {
-                        let destination_address = Gpu::vram_address(x & 0x3ff, y & 0x1ff);
+                for y in 0..h {
+                    for x in 0..w {
+                        let destination_address =
+                            Gpu::vram_address((x_start + x) & 0x3ff, (y_start + y) & 0x1ff);
                         LittleEndian::write_u16(&mut self.vram[destination_address..], pixel);
                     }
                 }
-            },
-            0x03...0x1e => {}, // NOP
+            }
+            0x03..=0x1e => {} // NOP
             0x1f => self.irq = true,
-            0x20...0x3f => self.draw_polygon(command_word),
-            0x40...0x5f => (), //self.draw_line(command_word),
-            0x60...0x7f => self.draw_rectangle(command_word),
-            0x80...0x9f => {
-                let src = self.command_buffer.pop();
-                let dest = self.command_buffer.pop();
-                let size = self.command_buffer.pop();
+            0x20..=0x3f => self.draw_polygon(),
+            0x40..=0x5f => self.draw_line(),
+            0x60..=0x7f => self.draw_rectangle(),
+            0x80..=0x9f => {
+                let src = self.command_buffer[1];
+                let dest = self.command_buffer[2];
+                let size = self.command_buffer[3];
 
                 let src_x = src & 0x3ff;
-                let src_y = (src >> 16) & 0x1ff;
+                let src_y = (src >> 16) & 0x3ff;
                 let dest_x = dest & 0x3ff;
-                let dest_y = (dest >> 16) & 0x1ff;
-                let w = size & 0x3ff;
-                let h = (size >> 16) & 0x1ff;
+                let dest_y = (dest >> 16) & 0x3ff;
+                let mut w = size & 0x3ff;
+                let mut h = (size >> 16) & 0x1ff;
 
-                for y in src_y..src_y + h {
-                    for x in src_x..src_x + w {
-                        let src_address = Gpu::vram_address((src_x + x) & 0x3ff, (src_y + y) & 0x1ff);
-                        let dest_address = Gpu::vram_address((dest_x + x) & 0x3ff, (dest_y + y) & 0x1ff);
+                if w == 0 { w = 0x400; }
+                if h == 0 { h = 0x200; }
 
-                        let data = LittleEndian::read_u16(&self.vram[src_address..]);
+                for y in 0..h {
+                    for x in 0..w {
+                        let src_address =
+                            Gpu::vram_address((src_x + x) & 0x3ff, (src_y + y) & 0x1ff);
+                        let dest_address =
+                            Gpu::vram_address((dest_x + x) & 0x3ff, (dest_y + y) & 0x1ff);
+
+                        let mut data = LittleEndian::read_u16(&self.vram[src_address..]);
+
+                        if self.skip_masked_pixels {
+                            let prev = LittleEndian::read_u16(&self.vram[dest_address..]);
+
+                            if (prev & 0x8000) != 0 {
+                                continue;
+                            }
+                        }
+
+                        if self.set_mask_bit {
+                            data |= 0x8000;
+                        }
+
                         LittleEndian::write_u16(&mut self.vram[dest_address..], data);
                     }
                 }
-            },
-            0xa0...0xbf => {
-                let destination = self.command_buffer.pop();
-                let size = self.command_buffer.pop();
+            }
+            0xa0..=0xbf => {
+                let destination = self.command_buffer[1];
+                let size = self.command_buffer[2];
 
                 let x = destination & 0x3ff;
-                let y = (destination >> 16) & 0x1ff;
+                let y = (destination >> 16) & 0x3ff;
                 let w = size & 0x3ff;
                 let h = (size >> 16) & 0x1ff;
 
@@ -626,14 +828,22 @@ impl Gpu {
                 self.cpu_to_gpu_transfer.w = w;
                 self.cpu_to_gpu_transfer.h = h;
 
+                if self.cpu_to_gpu_transfer.w == 0 {
+                    self.cpu_to_gpu_transfer.w = 0x400;
+                }
+
+                if self.cpu_to_gpu_transfer.h == 0 {
+                    self.cpu_to_gpu_transfer.h = 0x200;
+                }
+
                 self.cpu_to_gpu_transfer.rx = 0;
                 self.cpu_to_gpu_transfer.ry = 0;
 
                 self.cpu_to_gpu_transfer.active = true;
-            },
-            0xc0...0xdf => {
-                let destination = self.command_buffer.pop();
-                let size = self.command_buffer.pop();
+            }
+            0xc0..=0xdf => {
+                let destination = self.command_buffer[1];
+                let size = self.command_buffer[2];
 
                 let x = destination & 0x3ff;
                 let y = (destination >> 16) & 0x1ff;
@@ -649,8 +859,8 @@ impl Gpu {
                 self.gpu_to_cpu_transfer.ry = 0;
 
                 self.gpu_to_cpu_transfer.active = true;
-            },
-            0xe0 => {}, // NOP
+            }
+            0xe0 => {} // NOP
             0xe1 => {
                 self.texpage.flip_y = (command_word & 0x2000) != 0;
                 self.texpage.flip_x = (command_word & 0x1000) != 0;
@@ -663,7 +873,7 @@ impl Gpu {
                     1 => TexturePageColours::TP8Bit,
                     2 => TexturePageColours::TP15Bit,
                     3 => TexturePageColours::Reserved,
-                    _ => unreachable!(),   
+                    _ => unreachable!(),
                 };
 
                 self.texpage.semi_transparency = match (command_word & 0x60) >> 5 {
@@ -671,220 +881,51 @@ impl Gpu {
                     1 => SemiTransparency::Add,
                     2 => SemiTransparency::Subtract,
                     3 => SemiTransparency::AddQuarter,
-                    _ => unreachable!(),   
+                    _ => unreachable!(),
                 };
 
                 self.texpage.y_base = (command_word & 0x10) * 16;
                 self.texpage.x_base = (command_word & 0xf) * 64;
-            },
+            }
             0xe2 => {
                 self.texture_window = command_word & 0xf_ffff;
                 self.texture_window_offset_y = ((command_word & 0xf_8000) >> 15) * 8;
                 self.texture_window_offset_x = ((command_word & 0x7c00) >> 10) * 8;
                 self.texture_window_mask_y = ((command_word & 0x3e0) >> 5) * 8;
                 self.texture_window_mask_x = (command_word & 0x1f) * 8;
-            },
+            }
             0xe3 => {
+                let x = command_word & 0x3ff;
+                let y = (command_word & 0x7_fc00) >> 10;
+
                 self.drawing_begin = command_word & 0x7_ffff;
-                self.drawing_y_begin = (command_word & 0xf_fc00) >> 10;
-                self.drawing_x_begin = command_word & 0x3ff;
-            },
+                self.drawing_y_begin = y as i32;
+                self.drawing_x_begin = x as i32;
+            }
             0xe4 => {
+                let x = command_word & 0x3ff;
+                let y = (command_word & 0x7_fc00) >> 10;
+
                 self.drawing_end = command_word & 0x7_ffff;
-                self.drawing_y_end = (command_word & 0xf_fc00) >> 10;
-                self.drawing_x_end = command_word & 0x3ff;
-            },
+                self.drawing_y_end = y as i32;
+                self.drawing_x_end = x as i32;
+            }
             0xe5 => {
                 self.drawing_offset = command_word & 0x3f_ffff;
 
-                let mut dyo = (command_word >> 11) & 0x7ff;
-                let mut dxo = command_word & 0x7ff;
+                let dyo = (command_word >> 11) & 0x7ff;
+                let dxo = command_word & 0x7ff;
 
-                if (dyo & 0x800) != 0 {
-                    dyo |= 0xffff_f800; 
-                }
-
-                if (dxo & 0x800) != 0 {
-                    dxo |= 0xffff_f800; 
-                }
-
-                self.drawing_y_offset = dyo as i32;
-                self.drawing_x_offset = dxo as i32;
-            },
+                self.drawing_y_offset = util::sign_extend_i32(dyo as i32, 11);
+                self.drawing_x_offset = util::sign_extend_i32(dxo as i32, 11);
+            }
             0xe6 => {
                 self.skip_masked_pixels = (command_word & 0x2) != 0;
                 self.set_mask_bit = (command_word & 0x1) != 0;
-            },
-            0xe7...0xff => {}, // NOP
+            }
+            0xe7..=0xff => {} // NOP
             _ => panic!("[GPU] [ERROR] Unknown command GP0({:02x})", command),
         }
-    }
-
-    fn shaded(command: usize) -> bool {
-        (command & 0x10) != 0
-    }
-
-    fn vertices(command: usize) -> (usize, usize) {
-        match (command & 0x08) != 0 {
-            false => (1, 3),
-            true => (2, 4),
-        }
-    }
-
-    fn rect_size(command: usize) -> i32 {
-        match (command & 0x18) >> 3 {
-            0x0 => 0,
-            0x1 => 1,
-            0x2 => 8,
-            0x3 => 16,
-            _ => unreachable!(),
-        }
-    }
-
-    fn textured(command: usize) -> bool {
-        (command & 0x04) != 0
-    }
-
-    fn semi_tranparent(command: usize) -> bool {
-        (command & 0x02) != 0
-    }
-
-    fn blending(command: usize) -> bool {
-        (command & 0x01) == 0
-    }
-
-    fn get_colour(word: u32) -> Colour {
-        Colour::from_u32(word)
-    }
-
-    fn get_coord(&self, word: u32) -> Vector2i {
-        let xo = self.drawing_x_offset;
-        let yo = self.drawing_y_offset;
-
-        let mut x = (word & 0xffff) as u16;
-        let mut y = (word >> 16) as u16;
-
-            if (y & 0x400) != 0 {
-                y |= 0xfc00; 
-            }
-
-            if (x & 0x400) != 0 {
-                x |= 0x_fc00; 
-            }
-
-        Vector2i::new(xo + (x as i16 as i32), yo + (y as i16 as i32))
-    }
-
-    fn get_texcoord(word: u32) -> Vector2i {
-        let x = (word & 0xff) as i32;
-        let y = ((word >> 8) & 0xff) as i32;
-
-        Vector2i::new(x, y)
-    }
-
-    fn get_clut(word: u32) -> Vector2i {
-        let clut = word >> 16;
-
-        let x = ((clut & 0x3f) << 4) as i32;
-        let y = ((clut >> 6) & 0x1ff) as i32;
-
-        Vector2i::new(x, y)
-    }
-
-    fn draw_polygon(&mut self, command_word: u32) {
-        let command = (command_word >> 24) as usize;
-
-        self.rectangle = false;
-
-        self.shaded = Gpu::shaded(command);
-        self.semi_tranparent = Gpu::semi_tranparent(command);
-        self.blending = Gpu::blending(command);
-        self.textured = Gpu::textured(command);
-
-        let (polygons, vertices) = Gpu::vertices(command);
-
-        let mut coords = [Vector2i::new(0, 0); 4];
-        let mut texcoords = [Vector2i::new(0, 0); 4];
-        let mut colours = [Gpu::get_colour(command_word); 4];
-
-        let mut clut = Vector2i::new(0, 0);
-        let mut texpage = GpuTexpage::new();
-
-        for i in 0..vertices {
-            if self.shaded && (i != 0) {
-                colours[i] = Gpu::get_colour(self.command_buffer.pop());
-            }
-
-            let coord = self.command_buffer.pop();
-            coords[i] = self.get_coord(coord);
-
-            if self.textured {
-                let texcoord = self.command_buffer.pop();
-                texcoords[i] = Gpu::get_texcoord(texcoord);
-
-                if i == 0 {
-                    clut = Gpu::get_clut(texcoord);
-                } else if i == 1 {
-                    texpage = GpuTexpage::from_u32(texcoord);
-                }
-            }
-        }
-
-        self.rasterise_triangle(&coords[0..3], &texcoords[0..3], &colours[0..3], clut, texpage);
-
-        if polygons == 2 {
-            self.rasterise_triangle(&coords[1..4], &texcoords[1..4], &colours[1..4], clut, texpage);
-        }
-    }
-
-    fn draw_rectangle(&mut self, command_word: u32) {
-        let command = (command_word >> 24) as usize;
-
-        let size = Gpu::rect_size(command);
-        
-        self.rectangle = true;
-
-        self.shaded = false;
-        self.semi_tranparent = Gpu::semi_tranparent(command);
-        self.blending = Gpu::blending(command);
-        self.textured = Gpu::textured(command);
-
-        let mut coords = [Vector2i::new(0, 0); 4];
-
-        let colours = [Colour::from_u32(command_word); 4];
-
-        let mut texcoords = [Vector2i::new(0, 0); 4];
-        let mut clut = Vector2i::new(0, 0);
-        let texpage = self.texpage;
-
-        let coord = self.command_buffer.pop();
-        coords[0] = self.get_coord(coord);
-
-        if self.textured {
-            let t = self.command_buffer.pop();
-            texcoords[0] = Gpu::get_texcoord(t);
-
-            clut = Gpu::get_clut(t);
-        }
-
-        let (w, h) = match size {
-            0 => {
-                let rect_size = self.command_buffer.pop();
-                ((rect_size & 0xffff) as i16 as i32, (rect_size >> 16) as i16 as i32)
-            },
-            _ => (size, size),
-        };
-
-        coords[1] = Vector2i::new(coords[0].x + w,  coords[0].y);
-        coords[2] = Vector2i::new(coords[0].x,      coords[0].y + h);
-        coords[3] = Vector2i::new(coords[0].x + w,  coords[0].y + h);
-
-        texcoords[1] = Vector2i::new(texcoords[0].x + w,    texcoords[0].y);
-        texcoords[2] = Vector2i::new(texcoords[0].x,        texcoords[0].y + h);
-        texcoords[3] = Vector2i::new(texcoords[0].x + w,    texcoords[0].y + h);
-
-        self.rasterise_triangle(&coords[0..3], &texcoords[0..3], &colours[0..3], clut, texpage);
-        self.rasterise_triangle(&coords[1..4], &texcoords[1..4], &colours[1..4], clut, texpage);
     }
 
     pub fn execute_gp1_command(&mut self, command_word: u32) {
@@ -935,21 +976,14 @@ impl Gpu {
                 self.hres = 320;
                 self.vres = 240;
                 self.vertical_interlace = false;
-
-                self.update_video_mode();
+                self.interlace_field = false;
 
                 self.skip_masked_pixels = false;
                 self.set_mask_bit = false;
-            },
-            0x01 => {
-                self.command_buffer.clear();
-            },
-            0x02 => {
-                self.irq = false;
-            },
-            0x03 => {
-                self.display_disable = (command_word & 0x1) != 0;
-            },
+            }
+            0x01 => self.command_buffer_index = 0,
+            0x02 => self.irq = false,
+            0x03 => self.display_disable = (command_word & 0x1) != 0,
             0x04 => {
                 self.dma_direction = match command_word & 0x3 {
                     0 => DmaDirection::Off,
@@ -958,32 +992,23 @@ impl Gpu {
                     3 => DmaDirection::GpureadToCpu,
                     _ => unreachable!(),
                 };
-            },
+            }
             0x05 => {
                 self.display_area_y = (command_word & 0x7_fc00) >> 10;
                 self.display_area_x = command_word & 0x3ff;
-            },
+            }
             0x06 => {
                 self.horizontal_display_end = (command_word & 0xff_f000) >> 12;
                 self.horizontal_display_start = command_word & 0xfff;
-
-                self.update_video_mode();
-            },
+            }
             0x07 => {
                 self.vertical_display_end = (command_word & 0xf_fc00) >> 10;
                 self.vertical_display_start = command_word & 0x3ff;
-
-                self.update_video_mode();
-            },
+            }
             0x08 => {
                 self.reverse = (command_word & 0x80) != 0;
                 self.vertical_interlace = (command_word & 0x20) != 0;
                 self.colour_depth = (command_word & 0x10) != 0;
-
-                if self.colour_depth {
-                    panic!("[GPU] [ERROR] Unsupported display colour depth: 24bit.");
-                }
-
                 self.video_mode = (command_word & 0x8) != 0;
 
                 self.vres = match (self.vertical_interlace, (command_word & 0x4) != 0) {
@@ -999,11 +1024,11 @@ impl Gpu {
                     (false, 3) => 640,
                     _ => unreachable!(),
                 };
-
-                self.update_video_mode();
-            },
+            }
             0x09 => (), //New Texture Disable
-            0x10...0x1f => {
+            0x10..=0x1f => {
+                //println!("GPUREAD command {:#x}", command_word);
+
                 match command_word & 0x07 {
                     0x02 => self.gpuread = self.texture_window,
                     0x03 => self.gpuread = self.drawing_begin,
@@ -1011,280 +1036,568 @@ impl Gpu {
                     0x05 => self.gpuread = self.drawing_offset,
                     _ => (),
                 };
-            },
+            }
             0x20 => (), //Arcade Texture Disable
             _ => panic!("[GPU] [ERROR] Unknown command GP1({:02x})", command),
         }
     }
 
-    fn rasterise_pixel(&mut self, p: Vector2i, c: Colour, texpage: GpuTexpage) {
-        let x = p.x as usize;
-        let y = p.y as usize;
-        
-        let mut colour = c;
+    fn to_coord(&self, value: u32) -> Vector2i {
+        let x = util::sign_extend_i32((value & 0xffff) as i32, 11);
+        let y = util::sign_extend_i32((value >> 16) as i32, 11);
 
-        if self.semi_tranparent && colour.a {
-            colour = self.blend(colour, x, y, texpage)
-        }
+        let xoffset = self.drawing_x_offset;
+        let yoffset = self.drawing_y_offset;
 
-        if !self.rectangle && (self.shaded || self.textured) {
-            colour = self.dither(colour, x, y);
-        }
-
-        let pixel = colour.to_u16();
-
-        self.vram[2 * (x + y * 1024)] = pixel as u8;
-        self.vram[2 * (x + y * 1024) + 1] = (pixel >> 8) as u8;
+        Vector2i::new(x + xoffset, y + yoffset)
     }
 
-    fn dither(&self, mut colour: Colour, x: usize, y: usize) -> Colour {
-        if !self.texpage.dithering_enable {
-            return colour;
-        }
+    fn to_texcoord(&self, value: u32) -> Vector2i {
+        let x = value & 0xff;
+        let y = (value & 0xff00) >> 8;
 
-        let dither_offset = (Gpu::dither_get_offset(x, y) as f32) / 255.0;
-
-        colour.r = Gpu::clamp(colour.r + dither_offset, 0.0, 1.0);
-        colour.g = Gpu::clamp(colour.g + dither_offset, 0.0, 1.0);
-        colour.b = Gpu::clamp(colour.b + dither_offset, 0.0, 1.0);
-
-        colour
+        Vector2i::new(x as i32, y as i32)
     }
 
-    fn clamp(value: f32, min: f32, max: f32) -> f32 {
-        if value < min {
-            return min;
-        }
+    fn mask_texcoord(&self, mut uv: Vector2i) -> Vector2i {
+        let mask_x = self.texture_window_mask_x as i32;
+        let mask_y = self.texture_window_mask_y as i32;
 
-        if value > max {
-            return max;
-        }
+        let offset_x = self.texture_window_offset_x as i32;
+        let offset_y = self.texture_window_offset_y as i32;
 
-        value
+        uv.x = (uv.x & !mask_x) | (offset_x & mask_x);
+        uv.y = (uv.y & !mask_y) | (offset_y & mask_y);
+
+        uv
     }
 
-    fn blend(&self, front: Colour, x: usize, y: usize, texpage: GpuTexpage) -> Colour {
-        let mut back = Colour::from_u16(LittleEndian::read_u16(&self.vram[2 * (x + y * 1024)..]));
+    fn to_clut(value: u32) -> Vector2i {
+        let x = ((value >> 16) & 0x3f) << 4;
+        let y = ((value >> 16) & 0x7fc0) >> 6;
 
-        match texpage.semi_transparency {
-            SemiTransparency::Half => {
-                back.r = (back.r * front.r) / 2.0;
-                back.g = (back.g * front.g) / 2.0;
-                back.b = (back.b * front.b) / 2.0;
+        Vector2i::new(x as i32, y as i32)
+    }
+
+    fn draw_polygon(&mut self) {
+        let command = self.command_buffer[0] >> 24;
+
+        let mut vertices = [Vector2i::new(0, 0); 4];
+        let mut colours = [Colour::from_u32(self.command_buffer[0]); 4];
+        let mut texcoords = [Vector2i::new(0, 0); 4];
+        let mut clut = Vector2i::new(0, 0);
+        let mut texpage = self.texpage;
+        let mut texpage_raw = 0;
+
+        let shaded = (command & 0x10) != 0;
+        let points = match (command & 0x8) != 0 {
+            true => 4,
+            false => 3,
+        };
+        let textured = (command & 0x4) != 0;
+        let transparency = (command & 0x2) != 0;
+        let blend = (command & 0x1) == 0;
+
+        let mut pos = 0;
+
+        for i in 0..points {
+            if shaded || (i == 0) {
+                colours[i] = Colour::from_u32(self.command_buffer[pos]);
+                pos += 1;
+            }
+
+            vertices[i] = self.to_coord(self.command_buffer[pos]);
+            pos += 1;
+
+            if textured {
+                texcoords[i] = self.to_texcoord(self.command_buffer[pos]);
+
+                if i == 0 {
+                    clut = Gpu::to_clut(self.command_buffer[pos]);
+                } else if i == 1 {
+                    texpage = Texpage::from_u32(self.command_buffer[pos]);
+                    texpage_raw = (self.command_buffer[pos] >> 16) as u16;
+                }
+
+                pos += 1;
+            }
+        }
+
+        if textured {
+            if (texpage.x_base != self.command_tpx)
+               || (texpage.y_base != self.command_tpy)
+               || (texpage.colour_depth != self.command_depth)
+               || (clut.x != self.command_clut_x)
+               || (clut.y != self.command_clut_y) {
+                self.invalidate_cache();
+            }
+
+            self.command_tpx = texpage.x_base;
+            self.command_tpy = texpage.y_base;
+            self.command_depth = texpage.colour_depth;
+            self.command_clut_x = clut.x;
+            self.command_clut_y = clut.y;
+
+            self.texpage = texpage;
+        }
+
+        let mut polygon = GpuPolygon::new();
+        polygon.shaded = shaded;
+        polygon.quad = points == 4;
+        polygon.textured = textured;
+        polygon.semi_transparent = transparency;
+        polygon.raw_texture = !blend;
+
+        for i in 0..4 {
+            polygon.vertices[i].position = (vertices[i].x as i16, vertices[i].y as i16);
+            polygon.vertices[i].texcoord = (texcoords[i].x as u8, texcoords[i].y as u8);
+            polygon.vertices[i].colour = (colours[i].r, colours[i].g, colours[i].b);
+        }
+
+        polygon.texpage = texpage_raw;
+
+        //self.frame.add(GpuCommand::Polygon(polygon));
+
+        colours[0] = Colour::from_u32(self.command_buffer[0]);
+        self.rasterise_triangle(&vertices[0..3],
+                                &colours[0..3],
+                                &texcoords[0..3],
+                                clut,
+                                shaded, textured,
+                                blend, transparency);
+
+        if points == 4 {
+            self.rasterise_triangle(&vertices[1..4],
+                                    &colours[1..4],
+                                    &texcoords[1..4],
+                                    clut,
+                                    shaded, textured,
+                                    blend, transparency);
+        }
+    }
+
+    fn draw_line(&mut self) {
+        let command = self.command_buffer[0] >> 24;
+
+        let shaded = (command & 0x10) != 0;
+        let polyline = (command & 0x8) != 0;
+        let transparency = (command & 0x2) != 0;
+
+        self.polyline = polyline;
+        self.polyline_remaining = match shaded {
+            false => 1,
+            true => 2,
+        };
+    }
+
+    fn draw_rectangle(&mut self) {
+        let command = self.command_buffer[0] >> 24;
+
+        let rect_size = (command & 0x18) >> 3;
+        let textured = (command & 0x4) != 0;
+        let transparency = (command & 0x2) != 0;
+        let blend = (command & 0x1) == 0;
+
+        let colour = Colour::from_u32(self.command_buffer[0]);
+
+        let vertex = self.to_coord(self.command_buffer[1]);
+
+        let texpage = self.texpage;
+
+        let mut texcoord = Vector2i::new(0, 0);
+        let mut clut = Vector2i::new(0, 0);
+
+        let mut pos = 2;
+
+        if textured {
+            texcoord = self.to_texcoord(self.command_buffer[pos]);
+            clut = Gpu::to_clut(self.command_buffer[pos]);
+
+            if (texpage.x_base != self.command_tpx)
+               || (texpage.y_base != self.command_tpy)
+               || (texpage.colour_depth != self.command_depth)
+               || (clut.x != self.command_clut_x)
+               || (clut.y != self.command_clut_y) {
+                self.invalidate_cache();
+            }
+
+            self.command_tpx = texpage.x_base;
+            self.command_tpy = texpage.y_base;
+            self.command_depth = texpage.colour_depth;
+            self.command_clut_x = clut.x;
+            self.command_clut_y = clut.y;
+
+            pos += 1;
+        }
+
+        let size = match rect_size {
+            0 => {
+                let tmp = self.command_buffer[pos];
+                let x = (tmp & 0x3ff) as i32;
+                let y = ((tmp >> 16) & 0x1ff) as i32;
+
+                Vector2i::new(x, y)
             },
-            SemiTransparency::Add => {
-                back.r += front.r;
-                back.g += front.g;
-                back.b += front.b;
-            },
-            SemiTransparency::Subtract => {
-                back.r -= front.r;
-                back.g -= front.g;
-                back.b -= front.b;
-            },
-            SemiTransparency::AddQuarter => {
-                back.r += front.r / 4.0;
-                back.g += front.g / 4.0;
-                back.b += front.b / 4.0;
-            },
+            1 => Vector2i::new(1, 1),
+            2 => Vector2i::new(8, 8),
+            3 => Vector2i::new(16, 16),
+            _ => unreachable!(),
         };
 
-        back.r = Gpu::clamp(back.r, 0.0, 1.0);
-        back.g = Gpu::clamp(back.g, 0.0, 1.0);
-        back.b = Gpu::clamp(back.b, 0.0, 1.0);
+        for y in 0..size.y {
+            for x in 0..size.x {
+                let p = Vector2i::new(vertex.x + x, vertex.y + y);
 
-        back
+                if (p.x < self.drawing_x_begin) || (p.x > self.drawing_x_end)
+                   || (p.y < self.drawing_y_begin) || (p.y > self.drawing_y_end) {
+                    continue;
+                }
+
+                let mut output = colour;
+
+                if textured {
+                    let mut uv = Vector2i::new(texcoord.x + (x & 0xff), texcoord.y + (y & 0xff));
+                    uv = self.mask_texcoord(uv);
+                    
+                    let (mut texture, skip) = self.get_texture(uv, clut);
+
+                    if skip {
+                        continue;
+                    }
+
+                    if blend {
+                        texture.r = util::clip((texture.r() * colour.r()) >> 7, 0, 255) as u8;
+                        texture.g = util::clip((texture.g() * colour.g()) >> 7, 0, 255) as u8;
+                        texture.b = util::clip((texture.b() * colour.b()) >> 7, 0, 255) as u8;
+                    }
+
+                    output = texture;
+                }
+
+                self.render_pixel(p, output, transparency, !textured);
+            }
+        }
     }
 
-    fn bounding_box(&self, a: Vector2i, b: Vector2i, c: Vector2i) -> (Vector2i, Vector2i) {
-        let mut min = Vector2i::new(0, 0);
-        let mut max = Vector2i::new(0, 0);
+    fn interpolate_colour(area: i32, w: Vector3i,
+                          c0: Colour,
+                          c1: Colour,
+                          c2: Colour) -> Colour {
+        let r = (w.x * c0.r() + w.y * c1.r() + w.z * c2.r()) / area;
+        let g = (w.x * c0.g() + w.y * c1.g() + w.z * c2.g()) / area;
+        let b = (w.x * c0.b() + w.y * c1.b() + w.z * c2.b()) / area;
 
-        let min_draw_x = cmp::max(0, self.drawing_x_begin as i32);
-        let min_draw_y = cmp::max(0, self.drawing_y_begin as i32);
-
-        let max_draw_x = cmp::min(1025, self.drawing_x_end as i32);
-        let max_draw_y = cmp::min(513, self.drawing_y_end as i32);
-
-        let min_x = cmp::min(a.x, cmp::min(b.x, c.x));
-        let min_y = cmp::min(a.y, cmp::min(b.y, c.y));
-
-        let max_x = cmp::max(a.x, cmp::max(b.x, c.x));
-        let max_y = cmp::max(a.y, cmp::max(b.y, c.y));
-
-        min.x = cmp::max(min_x, min_draw_x);
-        min.y = cmp::max(min_y, min_draw_y);
-
-        max.x = cmp::min(max_x, max_draw_x);
-        max.y = cmp::min(max_y, max_draw_y);
-
-        (min, max)
+        Colour::new(r as u8, g as u8, b as u8, false)
     }
 
-    fn rasterise_triangle(&mut self, p: &[Vector2i], t: &[Vector2i], c: &[Colour], clut: Vector2i, texpage: GpuTexpage) {
-        let p0 = p[0];
-        let mut p1 = p[1];
-        let mut p2 = p[2];
+    fn interpolate_texcoord(area: i32, w: Vector3i,
+                            t0: Vector2i,
+                            t1: Vector2i,
+                            t2: Vector2i) -> Vector2i {
+        let u = (w.x * t0.x + w.y * t1.x + w.z * t2.x) / area;
+        let v = (w.x * t0.y + w.y * t1.y + w.z * t2.y) / area;
 
-        let mut tex = [Vector2i::new(0, 0); 3];
-        tex[0] = t[0];
-        tex[1] = t[1];
-        tex[2] = t[2];
+        Vector2i::new(u, v)
+    }
 
-        let mut col = [Colour::new(0.0, 0.0, 0.0, false); 3];
-        col[0] = c[0];
-        col[1] = c[1];
-        col[2] = c[2];
+    fn is_top_left(x: i32, y: i32) -> bool {
+        (y < 0) || ((x < 0) && (y == 0))
+    }
 
-        let mut area = Vector2i::orient2d(p0, p1, p2) as f32;
+    fn rasterise_triangle(&mut self,
+                          vertices: &[Vector2i],
+                          colours: &[Colour],
+                          texcoords: &[Vector2i],
+                          clut: Vector2i,
+                          shaded: bool, textured: bool,
+                          blend: bool, transparency: bool) {
+        let mut v = [vertices[0], vertices[1], vertices[2]];
+        let mut c = [colours[0], colours[1], colours[2]];
+        let mut t = [texcoords[0], texcoords[1], texcoords[2]];
 
-        if area < 0.0 {
-            mem::swap(&mut p1, &mut p2);
+        let mut area = Vector2i::orient2d(v[0], v[1], v[2]);
 
-            tex.swap(1, 2);
-            col.swap(1, 2);
+        if area < 0 {
+            v.swap(1, 2);
+            c.swap(1, 2);
+            t.swap(1, 2);
 
-            area *= -1.0;
-
-        } else if area == 0.0 {
+            area = -area;
+        } else if area == 0 {
             return;
         }
 
-        let (min, max) = self.bounding_box(p0, p1, p2);
+        let mut minx = util::min3(v[0].x, v[1].x, v[2].x);
+        let mut miny = util::min3(v[0].y, v[1].y, v[2].y);
 
-        let a01 = p0.y - p1.y; let b01 = p1.x - p0.x;
-        let a12 = p1.y - p2.y; let b12 = p2.x - p1.x;
-        let a20 = p2.y - p0.y; let b20 = p0.x - p2.x;
+        let mut maxx = util::max3(v[0].x, v[1].x, v[2].x);
+        let mut maxy = util::max3(v[0].y, v[1].y, v[2].y);
 
-        let mut w0_row = Vector2i::orient2d(p1, p2, min);
-        let mut w1_row = Vector2i::orient2d(p2, p0, min);
-        let mut w2_row = Vector2i::orient2d(p0, p1, min);
+        if (maxx >= 1024 && minx >= 1024) || (maxx < 0 && minx < 0) {
+                return;
+        }
 
-        for y in min.y..max.y {
+        if (maxy >= 512 && miny >= 512) || (maxy < 0 && miny < 0) {
+                return;
+        }
+
+        if maxx - minx >= 1024 {
+            return;
+        }
+
+        if (maxy - miny) >= 512 {
+            return;
+        }
+
+        minx = cmp::max(minx, self.drawing_x_begin);
+        miny = cmp::max(miny, self.drawing_y_begin);
+
+        maxx = cmp::min(maxx, self.drawing_x_end);
+        maxy = cmp::min(maxy, self.drawing_y_end);
+
+        let a01 = v[0].y - v[1].y; let b01 = v[1].x - v[0].x;
+        let a12 = v[1].y - v[2].y; let b12 = v[2].x - v[1].x;
+        let a20 = v[2].y - v[0].y; let b20 = v[0].x - v[2].x;
+
+        let mut p = Vector2i::new(minx, miny);
+
+        let mut w0_row = Vector2i::orient2d(v[1], v[2], p);
+        let mut w1_row = Vector2i::orient2d(v[2], v[0], p);
+        let mut w2_row = Vector2i::orient2d(v[0], v[1], p);
+
+        let w0_bias = -(Gpu::is_top_left(b12, a12) as i32);
+        let w1_bias = -(Gpu::is_top_left(b20, a20) as i32);
+        let w2_bias = -(Gpu::is_top_left(b01, a01) as i32);
+
+        let mut colour = c[0];
+
+        while p.y < maxy {
             let mut w0 = w0_row;
             let mut w1 = w1_row;
             let mut w2 = w2_row;
 
-            for x in min.x..max.x {
-                if (w0 | w1 | w2) >= 0 {
-                    let v = Vector2i::new(x, y);
+            p.x = minx;
 
-                    let mut colour = match self.shaded {
-                        false => c[0],
-                        true => {
-                            let w = Vector3f::new(w0 as f32 / area, w1 as f32 / area, w2 as f32 / area);
-                            Gpu::get_shade(&col, w)
-                        },
-                    };
+            while p.x < maxx {
+                if ((w0 + w0_bias) | (w1 + w1_bias) | (w2 + w2_bias)) >= 0 {
+                    let w = Vector3i::new(w0, w1, w2);
 
-                    if self.textured {
-                        let w = Vector3f::new(w0 as f32 / area, w1 as f32 / area, w2 as f32 / area);
-                        let (mut texture, skip) = self.get_texture(&tex, w, clut, texpage);
+                    if shaded {
+                        colour = Gpu::interpolate_colour(area, w, c[0], c[1], c[2]);
+                    }
+
+                    let mut output = colour;
+
+                    if textured {
+                        let mut uv = Gpu::interpolate_texcoord(area, w, t[0], t[1], t[2]);
+                        uv = self.mask_texcoord(uv);
+                        
+                        let (mut texture, skip) = self.get_texture(uv, clut);
 
                         if skip {
-                            w0 -= a12;
-                            w1 -= a20;
-                            w2 -= a01;
+                            w0 += a12;
+                            w1 += a20;
+                            w2 += a01;
+
+                            p.x += 1;
                             continue;
                         }
 
-                        if self.blending {
-                            texture.r = Gpu::clamp(texture.r * colour.r * 2.0, 0.0, 1.0);
-                            texture.g = Gpu::clamp(texture.g * colour.g * 2.0, 0.0, 1.0);
-                            texture.b = Gpu::clamp(texture.b * colour.b * 2.0, 0.0, 1.0);
+                        if blend {
+                            texture.r = util::clip((texture.r() * colour.r()) >> 7, 0, 255) as u8;
+                            texture.g = util::clip((texture.g() * colour.g()) >> 7, 0, 255) as u8;
+                            texture.b = util::clip((texture.b() * colour.b()) >> 7, 0, 255) as u8;
                         }
 
-                        colour = texture;
-                    };
+                        output = texture;
+                    }
 
-                    self.rasterise_pixel(v, colour, texpage);
+                    self.render_pixel(p, output, transparency, !textured);
                 }
 
-                w0 -= a12;
-                w1 -= a20;
-                w2 -= a01;
+                w0 += a12;
+                w1 += a20;
+                w2 += a01;
+
+                p.x += 1;
             }
 
-            w0_row -= b12;
-            w1_row -= b20;
-            w2_row -= b01;
+            w0_row += b12;
+            w1_row += b20;
+            w2_row += b01;
+
+            p.y += 1;
         }
     }
 
-    fn get_shade(c: &[Colour], w: Vector3f) -> Colour {
-        Colour::interpolate_colour(c, w)
+    fn render_pixel(&mut self, p: Vector2i, c: Colour,
+                    transparency: bool, force_blend: bool) {
+        let address = Gpu::vram_address(p.x as u32, p.y as u32);
+        let back = Colour::from_u16(LittleEndian::read_u16(&self.vram[address..]));
+
+        let mut colour = c;
+
+        if self.skip_masked_pixels && back.a {
+            return;
+        }
+
+        if (force_blend || c.a) && transparency {
+            let r; let g; let b;
+
+            match self.texpage.semi_transparency {
+                SemiTransparency::Half => {
+                    r = (back.r() + c.r()) / 2;
+                    g = (back.g() + c.g()) / 2;
+                    b = (back.b() + c.b()) / 2;
+                }
+                SemiTransparency::Add => {
+                    r = back.r() + c.r();
+                    g = back.g() + c.g();
+                    b = back.b() + c.b();
+                }
+                SemiTransparency::Subtract => {
+                    r = back.r() - c.r();
+                    g = back.g() - c.g();
+                    b = back.b() - c.b();
+                }
+                SemiTransparency::AddQuarter => {
+                    r = back.r() + c.r() / 4;
+                    g = back.g() + c.g() / 4;
+                    b = back.b() + c.b() / 4;
+                }
+            };
+
+            colour.r = util::clip(r, 0, 255) as u8;
+            colour.g = util::clip(g, 0, 255) as u8;
+            colour.b = util::clip(b, 0, 255) as u8;
+        }
+
+        if self.set_mask_bit {
+            colour.a = true;
+        }
+
+        LittleEndian::write_u16(&mut self.vram[address..], colour.to_u16());
     }
 
-    fn get_texture(&self, t: &[Vector2i], w: Vector3f, clut: Vector2i, texpage: GpuTexpage) -> (Colour, bool) {
+    fn get_texture(&mut self, uv: Vector2i, clut: Vector2i) -> (Colour, bool) {
         use self::TexturePageColours::*;
 
-        let v = Vector2i::interpolate_texcoord(t, w);
-
-        let pixel = match texpage.colour_depth {
-            TP4Bit => self.read_clut_4bit(v, texpage, clut),
-            TP8Bit => self.read_clut_8bit(v, texpage, clut),
-            TP15Bit | Reserved => self.read_texpage(v, texpage),
-        };
-        
-        (Colour::from_u16(pixel), pixel == 0)
+        match self.texpage.colour_depth {
+            TP4Bit => self.read_clut_4bit(uv, clut),
+            TP8Bit => self.read_clut_8bit(uv, clut),
+            TP15Bit | Reserved => self.read_texture(uv),
+        }
     }
 
-    fn read_texpage(&self, v: Vector2i, texpage: GpuTexpage) -> u16 {
-        let x = texpage.x_base + ((v.x as u32) & 0xff);
-        let y = texpage.y_base + ((v.y as u32) & 0xff);
+    fn invalidate_cache(&mut self) {
+        for i in 0..256 {
+            self.texture_cache[i].tag = -1;
+        }
 
-        LittleEndian::read_u16(&self.vram[Gpu::vram_address(x & 0x3ff, y & 0x1ff)..])
+        self.clut_cache_tag = -1;
     }
 
-    fn read_clut_4bit(&self, v: Vector2i, texpage: GpuTexpage, clut: Vector2i) -> u16 {
-        let texture_address = (2 * texpage.x_base + ((v.x as u32)) / 2 + (texpage.y_base + ((v.y as u32))) * 2048) as usize;
-        let mut clut_index = self.vram[texture_address] as usize;
+    fn read_clut_4bit(&mut self, uv: Vector2i, clut: Vector2i) -> (Colour, bool) {
+        let address_x = 2 * self.texpage.x_base + ((uv.x / 2) & 0xff) as u32;
+        let address_y = self.texpage.y_base + (uv.y & 0xff) as u32;
+        let texture_address = (address_x + 2048 * address_y) as usize;
 
-        if v.x & 0x1 != 0 {
-            clut_index >>= 4;
+        let block = (((uv.y >> 6) << 2) + (uv.x >> 6)) as isize;
+        let entry = (((uv.y & 0x3f) << 2) + ((uv.x & 0x3f) >> 4)) as usize;
+
+        let index = ((uv.x >> 1) & 0x7) as usize;
+
+        let centry = &mut self.texture_cache[entry];
+
+        if centry.tag != block {
+            for i in 0..8 {
+                centry.data[i] = self.vram[(texture_address & !0x7) + i];
+            }
+
+            centry.tag = block;
+        }
+
+        let mut clut_entry = centry.data[index] as usize;
+
+        if (uv.x & 0x1) != 0 {
+            clut_entry >>= 4;
         } else {
-            clut_index &= 0x0f;
+            clut_entry &= 0xf;
         }
 
-        let clut_address = 2 * (clut.x + clut.y * 1024) as usize;
-        let indexed_clut = clut_address + clut_index * 2;
+        let clut_address = (2 * clut.x + 2048 * clut.y) as isize;
 
-        LittleEndian::read_u16(&self.vram[indexed_clut..])
+        if self.clut_cache_tag != clut_address {
+            for i in 0..16 {
+                let address = (clut_address as usize) + 2 * i;
+                self.clut_cache[i] = LittleEndian::read_u16(&self.vram[address..]);
+            }
+
+            self.clut_cache_tag = clut_address;
+        }
+
+        let texture = self.clut_cache[clut_entry];
+        (Colour::from_u16(texture), texture == 0)
     }
 
-    fn read_clut_8bit(&self, v: Vector2i, texpage: GpuTexpage, clut: Vector2i) -> u16 {
-        let texture_address = (2 * texpage.x_base + ((v.x as u32)) + (texpage.y_base + ((v.y as u32))) * 2048) as usize;
-        let clut_index = self.vram[texture_address] as usize;
+    fn read_clut_8bit(&mut self, uv: Vector2i, clut: Vector2i) -> (Colour, bool) {
+        let address_x = 2 * self.texpage.x_base + (uv.x & 0xff) as u32;
+        let address_y = self.texpage.y_base + (uv.y & 0xff) as u32;
+        let texture_address = (address_x + 2048 * address_y) as usize;
 
-        let clut_address = 2 * (clut.x + clut.y * 1024) as usize;
-        let indexed_clut = clut_address + clut_index * 2;
+        let block = (((uv.y >> 6) << 3) + (uv.x >> 5)) as isize;
+        let entry = (((uv.y & 0x3f) << 2) + ((uv.x & 0x1f) >> 3)) as usize;
 
-        LittleEndian::read_u16(&self.vram[indexed_clut..])
+        let index = (uv.x & 0x7) as usize;
+
+        let centry = &mut self.texture_cache[entry];
+
+        if centry.tag != block {
+            for i in 0..8 {
+                centry.data[i] = self.vram[(texture_address & !0x7) + i];
+            }
+
+            centry.tag = block;
+        }
+
+        let clut_entry = centry.data[index] as usize;
+
+        let clut_address = (2 * clut.x + 2048 * clut.y) as isize;
+
+        if self.clut_cache_tag != clut_address {
+            for i in 0..256 {
+                let address = (clut_address as usize) + 2 * i;
+                self.clut_cache[i] = LittleEndian::read_u16(&self.vram[address..]);
+            }
+
+            self.clut_cache_tag = clut_address;
+        }
+
+        let texture = self.clut_cache[clut_entry];
+        (Colour::from_u16(texture), texture == 0)
     }
 
-    fn update_video_mode(&mut self) {
-        let xstart = self.horizontal_display_start;
-        let xend = self.horizontal_display_end;
-        let dotclock = self.get_dotclock();
+    fn read_texture(&mut self, uv: Vector2i) -> (Colour, bool) {
+        let address_x = self.texpage.x_base + (uv.x & 0xff) as u32;
+        let address_y = self.texpage.y_base + (uv.y & 0xff) as u32;
+        let texture_address = 2 * (address_x + 1024 * address_y) as usize;
 
-        let ystart = self.vertical_display_start;
-        let yend = self.vertical_display_end;
+        let block = (((uv.y >> 5) << 3) + (uv.x >> 5)) as isize;
+        let entry = (((uv.y & 0x1f) << 3) + ((uv.x & 0x1f) >> 2)) as usize;
 
-        let xdiff;
+        let index = ((uv.x * 2) & 0x7) as usize;
 
-        if xstart <= xend {
-            xdiff = xend - xstart;
-        } else {
-            xdiff = 50;
+        let centry = &mut self.texture_cache[entry];
+
+        if centry.tag != block {
+            for i in 0..8 {
+                centry.data[i] = self.vram[(texture_address & !0x7) + i];
+            }
+
+            centry.tag = block;
         }
 
-        let x = ((xdiff / dotclock) + 2) & 0xffc;
-        let mut y = yend - ystart;
-
-        if self.vertical_interlace {
-            y <<= 1;
-        }
-
-        self.display.update_video_mode(x, y);
+        let texture = LittleEndian::read_u16(&centry.data[index..]);
+        (Colour::from_u16(texture), texture == 0)
     }
 }
