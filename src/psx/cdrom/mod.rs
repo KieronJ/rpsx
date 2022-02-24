@@ -251,6 +251,8 @@ pub struct Cdrom {
     drive_mode: CdromDriveMode,
     next_drive_mode: CdromDriveMode,
 
+    drive_interrupt_pending: bool,
+
     second_response_counter: isize,
     second_response_mode: CdromSecondResponseMode,
 
@@ -330,6 +332,8 @@ impl Cdrom {
             drive_counter: 0,
             drive_mode: CdromDriveMode::Idle,
             next_drive_mode: CdromDriveMode::Idle,
+
+            drive_interrupt_pending: false,
 
             second_response_counter: 0,
             second_response_mode: CdromSecondResponseMode::Idle,
@@ -644,166 +648,163 @@ impl Cdrom {
                     return;
                 }
 
-                if self.interrupt_flags == 0 {
-                    self.push_stat();
+                self.push_stat();
 
-                    self.data_busy = true;
+                self.data_busy = true;
 
-                    let cursor = self.get_seek_location();
-                    self.game_file.seek(SeekFrom::Start(cursor)).unwrap();
+                let cursor = self.get_seek_location();
+                self.game_file.seek(SeekFrom::Start(cursor)).unwrap();
 
-                    let mut info = [0u8; 0x18];
-                    self.game_file.read_exact(&mut info).unwrap();
+                let mut info = [0u8; 0x18];
+                self.game_file.read_exact(&mut info).unwrap();
 
-                    let header = CdromHeader::from_slice(&info[0xc..]);
-                    let subheader = CdromSubheader::from_slice(&info[0x10..]);
+                let header = CdromHeader::from_slice(&info[0xc..]);
+                let subheader = CdromSubheader::from_slice(&info[0x10..]);
 
-                    self.sector_header = header;
-                    self.sector_subheader = subheader;
+                self.sector_header = header;
+                self.sector_subheader = subheader;
 
-                    self.last_subq.track = 1;
-                    self.last_subq.index = 1;
-                    self.last_subq.mm = header.minute;
-                    self.last_subq.ss = header.second;
-                    self.last_subq.ff = header.sector;
-                    self.last_subq.amm = header.minute;
-                    self.last_subq.ass = header.second;
-                    self.last_subq.aff = header.sector;
+                self.last_subq.track = 1;
+                self.last_subq.index = 1;
+                self.last_subq.mm = header.minute;
+                self.last_subq.ss = header.second;
+                self.last_subq.ff = header.sector;
+                self.last_subq.amm = header.minute;
+                self.last_subq.ass = header.second;
+                self.last_subq.aff = header.sector;
 
-                    let mut mode = CdromSectorMode::Adpcm;
+                let mut mode = CdromSectorMode::Adpcm;
 
-                    if !self.mode_adpcm {
-                        mode = CdromSectorMode::Data;
-                    }
+                if !self.mode_adpcm || (subheader.mode() != CdromSubheaderMode::Audio) || !subheader.realtime() {
+                    mode = CdromSectorMode::Data;
+                }
 
-                    if self.mode_filter
-                        && ((self.filter_file != subheader.file)
-                            || (self.filter_channel != subheader.channel))
-                    {
-                        mode = CdromSectorMode::Data;
-                    }
+                if mode == CdromSectorMode::Adpcm && self.mode_filter && ((self.filter_file != subheader.file) || (self.filter_channel != subheader.channel)) {
+                    mode = CdromSectorMode::Ignore;
+                }
 
-                    if (subheader.mode() != CdromSubheaderMode::Audio) || !subheader.realtime() {
-                        mode = CdromSectorMode::Data;
-                    }
+                //if mode == CdromSectorMode::Data
+                //    && self.mode_filter
+                //    && (subheader.mode() == CdromSubheaderMode::Audio)
+                //    && subheader.realtime()
+                //{
+                //    mode = CdromSectorMode::Ignore;
+                //}
 
-                    if mode == CdromSectorMode::Data
-                        && self.mode_filter
-                        && (subheader.mode() == CdromSubheaderMode::Audio)
-                        && subheader.realtime()
-                    {
-                        mode = CdromSectorMode::Ignore;
-                    }
+                let sm = self.drive_seek_minute;
+                let ss = self.drive_seek_second;
+                let sf = self.drive_seek_sector;
 
-                    let sm = self.drive_seek_minute;
-                    let ss = self.drive_seek_second;
-                    let sf = self.drive_seek_sector;
+                if header.minute != sm || header.second != ss || header.sector != sf {
+                    println!("[CDROM] [ERROR] Sector with mismatched header detected");
+                    println!(
+                        "Expected {}:{}:{} found {}:{}:{}",
+                        sm, ss, sf, header.minute, header.second, header.sector
+                    );
+                }
 
-                    if header.minute != sm || header.second != ss || header.sector != sf {
-                        println!("[CDROM] [ERROR] Sector with mismatched header detected");
-                        println!(
-                            "Expected {}:{}:{} found {}:{}:{}",
-                            sm, ss, sf, header.minute, header.second, header.sector
-                        );
-                    }
+                if header.mode != 2 {
+                    println!("[CDROM] [ERROR] Unsupported MODE{} sector", header.mode);
+                }
 
-                    if header.mode != 2 {
-                        println!("[CDROM] [ERROR] Unsupported MODE{} sector", header.mode);
-                    }
+                self.ldrive_seek_sector = sm;
+                self.ldrive_seek_second = ss;
+                self.ldrive_seek_minute = sf;
 
-                    self.ldrive_seek_sector = sm;
-                    self.ldrive_seek_second = ss;
-                    self.ldrive_seek_minute = sf;
+                self.drive_seek_sector += 1;
 
-                    self.drive_seek_sector += 1;
+                if self.drive_seek_sector >= 75 {
+                    self.drive_seek_sector = 0;
+                    self.drive_seek_second += 1;
+                }
 
-                    if self.drive_seek_sector >= 75 {
-                        self.drive_seek_sector = 0;
-                        self.drive_seek_second += 1;
-                    }
+                if self.drive_seek_second >= 60 {
+                    self.drive_seek_second = 0;
+                    self.drive_seek_minute += 1;
+                }
 
-                    if self.drive_seek_second >= 60 {
-                        self.drive_seek_second = 0;
-                        self.drive_seek_minute += 1;
-                    }
+                match mode {
+                    CdromSectorMode::Adpcm => {
+                        if subheader.bit_depth() != 4 {
+                            println!("[CDROM] [ERROR] Unsupported bit depth");
+                            panic!();
+                        }
 
-                    match mode {
-                        CdromSectorMode::Adpcm => {
-                            if subheader.bit_depth() != 4 {
-                                println!("[CDROM] [ERROR] Unsupported bit depth");
-                                panic!();
-                            }
+                        //DECODE XA-ADPCM
+                        let channels = subheader.channels();
+                        let sampling_rate = subheader.sampling_rate();
 
-                            //DECODE XA-ADPCM
-                            let channels = subheader.channels();
-                            let sampling_rate = subheader.sampling_rate();
+                        let mut data = [0u8; 0x914];
+                        self.game_file.read_exact(&mut data).unwrap();
 
-                            let mut data = [0u8; 0x914];
-                            self.game_file.read_exact(&mut data).unwrap();
+                        self.adpcm_prev_samples[0] = [0, 0];
+                        self.adpcm_prev_samples[1] = [0, 0];
 
-                            self.adpcm_prev_samples[0] = [0, 0];
-                            self.adpcm_prev_samples[1] = [0, 0];
+                        for i in 0..0x12 {
+                            self.decode_adpcm_blocks(&data[i * 0x80..], channels);
+                        }
 
-                            for i in 0..0x12 {
-                                self.decode_adpcm_blocks(&data[i * 0x80..], channels);
-                            }
+                        for channel in 0..channels {
+                            let mut sixstep = 6;
+                            let mut ringbuf = [0; 0x20];
 
-                            for channel in 0..channels {
-                                let mut sixstep = 6;
-                                let mut ringbuf = [0; 0x20];
+                            for i in 0..self.adpcm_buffers[channel].len() {
+                                ringbuf[i & 0x1f] = self.adpcm_buffers[channel][i];
+                                sixstep -= 1;
 
-                                for i in 0..self.adpcm_buffers[channel].len() {
-                                    ringbuf[i & 0x1f] = self.adpcm_buffers[channel][i];
-                                    sixstep -= 1;
+                                if sixstep == 0 {
+                                    sixstep = 6;
 
-                                    if sixstep == 0 {
-                                        sixstep = 6;
+                                    for j in 0..7 {
+                                        let sample = self.zigzag_interpolate(i + 1, ringbuf, ADPCM_ZIGZAG_TABLE[j]);
 
-                                        for j in 0..7 {
-                                            let sample = self.zigzag_interpolate(i + 1, ringbuf, ADPCM_ZIGZAG_TABLE[j]);
+                                        let times = match sampling_rate {
+                                            18900 => 2,
+                                            37800 => 1,
+                                            _ => unreachable!()
+                                        };
 
-                                            let times = match sampling_rate {
-                                                18900 => 2,
-                                                37800 => 1,
-                                                _ => unreachable!()
-                                            };
-
-                                            for _ in 0..times {
-                                                match (channel, channels) {
-                                                    (_, 1) => spu.cd_push(sample, sample),
-                                                    (0, 2) => spu.cd_push_left(sample),
-                                                    (1, 2) => spu.cd_push_right(sample),
-                                                    _ => unreachable!(),
-                                                }
+                                        for _ in 0..times {
+                                            match (channel, channels) {
+                                                (_, 1) => spu.cd_push(sample, sample),
+                                                (0, 2) => spu.cd_push_left(sample),
+                                                (1, 2) => spu.cd_push_right(sample),
+                                                _ => unreachable!(),
                                             }
                                         }
                                     }
                                 }
                             }
-
-                            self.adpcm_buffers[0].clear();
-                            self.adpcm_buffers[1].clear();
                         }
-                        CdromSectorMode::Data => {
-                            self.game_file.seek(SeekFrom::Start(cursor)).unwrap();
-                            self.game_file.read_exact(&mut self.sector).unwrap();
 
+                        self.adpcm_buffers[0].clear();
+                        self.adpcm_buffers[1].clear();
+                    }
+                    CdromSectorMode::Data => {
+                        self.game_file.seek(SeekFrom::Start(cursor)).unwrap();
+                        self.game_file.read_exact(&mut self.sector).unwrap();
+
+                        // TODO: stat
+                        if self.drive_interrupt_pending {
+                            println!("[CDC] [WARN] Got drive interrupt whilst already pending");
+                        }
+
+                        if self.controller_interrupt_flags == 0 {
                             self.controller_interrupt_flags = 0x1;
-
-                            self.controller_mode = CdromControllerMode::ResponseClear;
-                            self.controller_counter += 10;
+                        } else {
+                            self.drive_interrupt_pending = true;
                         }
-                        CdromSectorMode::Ignore => {}, // Sector is skipped by Cdrom controller
-                    };
 
-                    self.drive_counter += 44100
-                        / match self.mode_double_speed {
-                            true => 150,
-                            false => 75,
-                        };
-                } else {
-                    self.drive_counter += 10;
-                }
+                        self.controller_mode = CdromControllerMode::ResponseClear;
+                        self.controller_counter += 10;
+                    }
+                    CdromSectorMode::Ignore => {}, // Sector is skipped by Cdrom controller
+                };
+
+                self.drive_counter += 44100 / match self.mode_double_speed {
+                    true => 150,
+                    false => 75,
+                };
             }
         };
     }
@@ -869,7 +870,7 @@ impl Cdrom {
 
         match command {
             0x01 => {
-                println!("Getstat");
+                println!("Nop");
 
                 self.push_stat();
             }
@@ -1330,6 +1331,11 @@ impl Cdrom {
                     }
                     Index1 => {
                         self.interrupt_flags &= !(value & 0x1f);
+
+                        if self.interrupt_flags == 0 && self.drive_interrupt_pending {
+                            self.interrupt_flags = 0x1;
+                            self.drive_interrupt_pending = false;
+                        }
 
                         self.response_buffer.clear();
 
