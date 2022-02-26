@@ -9,7 +9,7 @@ edition = "2018"
 byteorder = "1"
 clap = { version = "2", features = ["yaml"] }
 gl = "0.14"
-imgui = "0.2"
-imgui-opengl-renderer = "0.6.1"
-imgui-sdl2 = "0.8.0"
-sdl2 = { version = "0.33", features = ["bundled", "static-link"] }
+imgui = "0.7"
+imgui-opengl-renderer = "0.11"
+imgui-sdl2 = "0.14.0"
+sdl2 = { version = "0.34", features = ["bundled", "static-link"] }
