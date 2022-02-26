@@ -1,5 +1,6 @@
 use std::time::Instant;
 
+use sdl2::controller::{Axis, Button};
 use sdl2::event::{Event, WindowEvent};
 use sdl2::keyboard::Keycode;
 
@@ -25,6 +26,8 @@ pub struct Frontend {
 
     event_pump: sdl2::EventPump,
 
+    controller: Option<sdl2::controller::GameController>,
+
     vao: gl::types::GLuint,
     vbo: gl::types::GLuint,
     program: gl::types::GLuint,
@@ -42,6 +45,7 @@ pub struct Frontend {
 impl Frontend {
     pub fn create(ctx_temp: &mut sdl2::Sdl, width: u32, height: u32, title: &str) -> Self {
         let video = ctx_temp.video().unwrap();
+        let ctr = ctx_temp.game_controller().unwrap();
 
         let window = video.window(title, width, height)
             .resizable()
@@ -94,11 +98,21 @@ impl Frontend {
         let imgui_sdl2 = imgui_sdl2::ImguiSdl2::new(&mut imgui, &window);
         let imgui_renderer = imgui_opengl_renderer::Renderer::new(&mut imgui, |s| video.gl_get_proc_address(s) as _);
 
+        let mut controller = None;
+
+        if let Ok(c) = ctr.open(0) {
+            println!("[FRONTEND] Got connected controller #0 {}", c.name());
+            println!("[FRONTEND] Mappings: {}", c.mapping());
+            controller = Some(c);
+        }
+
         Self {
             window: window,
             _gl_context: gl_context,
 
             event_pump: ctx_temp.event_pump().unwrap(),
+
+            controller: controller,
 
             vao: vao,
             vbo: vbo,
@@ -126,6 +140,11 @@ impl Frontend {
             match event {
                 Event::KeyDown { keycode: Some(k), .. } => Frontend::handle_keydown(k, options, system),
                 Event::KeyUp { keycode: Some(k), .. } => Frontend::handle_keyup(k, options, system),
+
+                Event::ControllerButtonDown { button, .. } => Frontend::handle_controller_button(button, true, system),
+                Event::ControllerButtonUp { button, .. } => Frontend::handle_controller_button(button, false, system),
+                Event::ControllerAxisMotion { axis, value, .. } => Frontend::handle_controller_axis(axis, value, system),
+
                 Event::Window { win_event, .. } => {
                     match win_event {
                         WindowEvent::Resized(width, height) => {
@@ -137,6 +156,46 @@ impl Frontend {
                 Event::Quit { .. } => system.running = false,
                 _ => {},
             };
+        }
+    }
+
+    fn handle_controller_button(button: Button, down: bool, system: &mut System) {
+        let controller = system.get_controller();
+
+        // Invalid,
+        // Guide => PS
+
+        match button {
+            Button::A => controller.button_cross = down,
+            Button::B => controller.button_circle = down,
+            Button::X => controller.button_square = down,
+            Button::Y => controller.button_triangle = down,
+            Button::LeftShoulder => controller.button_l1 = down,
+            Button::RightShoulder => controller.button_r1 = down,
+            Button::Back => controller.button_select = down,
+            Button::Start => controller.button_start = down,
+            Button::LeftStick => controller.button_l3 = down,
+            Button::RightStick => controller.button_r3 = down,
+            Button::DPadUp => controller.button_dpad_up = down,
+            Button::DPadDown => controller.button_dpad_down = down,
+            Button::DPadLeft => controller.button_dpad_left = down,
+            Button::DPadRight => controller.button_dpad_right = down,
+            _ => println!("[FRONTEND] unhandled button {:#?}", button),
+        }
+    }
+
+    fn handle_controller_axis(axis: Axis, value: i16, system: &mut System) {
+        let controller = system.get_controller();
+        let normalised = ((value >> 8) + 128) as u8;
+
+        match axis {
+            Axis::LeftX => controller.axis_lx = normalised,
+            Axis::LeftY => controller.axis_ly = normalised,
+            Axis::RightX => controller.axis_rx = normalised,
+            Axis::RightY => controller.axis_ry = normalised,
+            Axis::TriggerLeft => controller.button_l2 = normalised >= 192,
+            Axis::TriggerRight => controller.button_r2 = normalised >= 192,
+            _ => (),
         }
     }
 
