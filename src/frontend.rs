@@ -162,9 +162,6 @@ impl Frontend {
     fn handle_controller_button(button: Button, down: bool, system: &mut System) {
         let controller = system.get_controller();
 
-        // Invalid,
-        // Guide => PS
-
         match button {
             Button::A => controller.button_cross = down,
             Button::B => controller.button_circle = down,
@@ -180,6 +177,12 @@ impl Frontend {
             Button::DPadDown => controller.button_dpad_down = down,
             Button::DPadLeft => controller.button_dpad_left = down,
             Button::DPadRight => controller.button_dpad_right = down,
+            Button::Guide => {
+                if !down {
+                    controller.digital_mode ^= true;
+                    println!("[FRONTEND] Digital mode {}", if controller.digital_mode { "enabled" } else { "disabled" });
+                }
+            },
             _ => println!("[FRONTEND] unhandled button {:#?}", button),
         }
     }

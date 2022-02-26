@@ -1,5 +1,6 @@
 pub struct Controller {
     state: usize,
+    pub digital_mode: bool,
 
     pub button_select: bool,
     pub button_l3: bool,
@@ -28,6 +29,7 @@ impl Controller {
     pub fn new() -> Controller {
         Controller {
             state: 0,
+            digital_mode: false,
 
             button_select: false,
             button_l3: false,
@@ -61,7 +63,7 @@ impl Controller {
             1 => {
                 if command == 0x42 {
                     self.state = 2;
-                    reply = 0x73;
+                    reply = if self.digital_mode { 0x41 } else { 0x73 };
                 } else {
                     self.state = 0;
                 }
@@ -76,7 +78,7 @@ impl Controller {
             },
             4 => {
                 reply = self.get_switch_state_hi();
-                self.state = 5;
+                self.state = if self.digital_mode { 0 } else { 5 };
             },
             5 => {
                 reply = self.axis_rx;
