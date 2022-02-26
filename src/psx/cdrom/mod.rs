@@ -252,6 +252,7 @@ pub struct Cdrom {
     next_drive_mode: CdromDriveMode,
 
     drive_interrupt_pending: bool,
+    drive_pending_stat: u8,
 
     second_response_counter: isize,
     second_response_mode: CdromSecondResponseMode,
@@ -334,6 +335,7 @@ impl Cdrom {
             next_drive_mode: CdromDriveMode::Idle,
 
             drive_interrupt_pending: false,
+            drive_pending_stat: 0,
 
             second_response_counter: 0,
             second_response_mode: CdromSecondResponseMode::Idle,
@@ -405,6 +407,8 @@ impl Cdrom {
                 let command = self.controller_command;
 
                 self.controller_counter += 10;
+
+                self.controller_response_buffer.clear();
 
                 self.execute_command(command);
                 self.controller_parameter_buffer.clear();
@@ -525,7 +529,7 @@ impl Cdrom {
                 self.last_subq.track = 1;
                 self.last_subq.index = 1;
                 self.last_subq.mm = self.seek_minute;
-                self.last_subq.ss = self.seek_second;
+                self.last_subq.ss = self.seek_second - 2;
                 self.last_subq.ff = self.seek_sector;
                 self.last_subq.amm = self.seek_minute;
                 self.last_subq.ass = self.seek_second;
@@ -667,7 +671,7 @@ impl Cdrom {
                 self.last_subq.track = 1;
                 self.last_subq.index = 1;
                 self.last_subq.mm = header.minute;
-                self.last_subq.ss = header.second;
+                self.last_subq.ss = header.second - 2;
                 self.last_subq.ff = header.sector;
                 self.last_subq.amm = header.minute;
                 self.last_subq.ass = header.second;
@@ -789,14 +793,16 @@ impl Cdrom {
                             println!("[CDC] [WARN] Got drive interrupt whilst already pending");
                         }
 
-                        if self.controller_interrupt_flags == 0 {
-                            self.controller_interrupt_flags = 0x1;
+                        if self.interrupt_flags == 0 {
+                            self.interrupt_flags = 0x1;
+                            self.response_buffer.push(self.get_stat());
                         } else {
                             self.drive_interrupt_pending = true;
+                            self.drive_pending_stat = self.get_stat();
                         }
 
-                        self.controller_mode = CdromControllerMode::ResponseClear;
-                        self.controller_counter += 10;
+                        //self.controller_mode = CdromControllerMode::ResponseClear;
+                        //self.controller_counter += 10;
                     }
                     CdromSectorMode::Ignore => {}, // Sector is skipped by Cdrom controller
                 };
@@ -1335,6 +1341,8 @@ impl Cdrom {
                         if self.interrupt_flags == 0 && self.drive_interrupt_pending {
                             self.interrupt_flags = 0x1;
                             self.drive_interrupt_pending = false;
+                            self.response_buffer.push(self.drive_pending_stat);
+                            println!("pushing pending stat from drive");
                         }
 
                         self.response_buffer.clear();
