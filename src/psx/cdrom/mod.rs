@@ -195,6 +195,42 @@ enum CdromSectorMode {
     Ignore,
 }
 
+static COMMAND_NAMES: [&'static str; 32] = [
+    "CdlSync",
+    "CdlNop",
+    "CdlSetloc",
+    "CdlPlay",
+    "CdlForward",
+    "CdlBackward",
+    "CdlReadN",
+    "CdlStandby",
+    "CdlStop",
+    "CdlPause",
+    "CdlReset",
+    "CdlMute",
+    "CdlDemute",
+    "CdlSetfilter",
+    "CdlSetmode",
+    "CdlGetparam",
+    "CdlGetlocL",
+    "CdlGetlocP",
+    "? 0x12",
+    "CdlGetTN",
+    "CdlGetTD",
+    "CdlSeekL",
+    "CdlSeekP",
+    "? 0x17",
+    "? 0x18",
+    "CdlTest",
+    "CdlGetID",
+    "CdlReadS",
+    "? 0x1c",
+    "? 0x1d",
+    "CdlGetTOC",
+    "? 0x1f"
+];
+
+
 pub struct Cdrom {
     index: CdromIndex,
 
@@ -872,12 +908,16 @@ impl Cdrom {
     }
 
     fn execute_command(&mut self, command: u8) {
+        if command >= 0x20 {
+            panic!("[CDC] Invalid command {}", command);
+        }
+
+        println!("[CDC] {}", COMMAND_NAMES[command as usize]);
+
         let mut interrupt = 0x3;
 
         match command {
             0x01 => {
-                println!("Nop");
-
                 self.push_stat();
             }
             0x02 => {
@@ -887,7 +927,7 @@ impl Cdrom {
                 let ss = self.controller_parameter_buffer.pop();
                 let ff = self.controller_parameter_buffer.pop();
 
-                println!("Setloc({:02x}, {:02x}, {:02x})", mm, ss, ff);
+                println!("({:02x}, {:02x}, {:02x})", mm, ss, ff);
 
                 self.seek_unprocessed = true;
 
@@ -927,8 +967,6 @@ impl Cdrom {
                 self.push_stat();
             }
             0x06 => {
-                println!("ReadN");
-
                 if self.seek_unprocessed {
                     self.seeking = true;
                     self.reading = false;
@@ -964,8 +1002,6 @@ impl Cdrom {
                 interrupt = 0x5;
             }
             0x09 => {
-                println!("Pause");
-
                 self.push_stat();
 
                 if self.playing == false && self.reading == false && self.seeking == false {
@@ -1055,16 +1091,6 @@ impl Cdrom {
                 self.controller_response_buffer.push(u8_to_bcd(self.last_subq.aff));
 
                 //self.controller_counter += 37937;
-
-                //println!("GetlocP response");
-                //println!("track: {:x}", 0x01);
-                //println!("index: {:x}", 0x01);
-                //println!("mm: {:x}", amm);
-                //println!("ss: {:x}", u8_to_bcd(self.drive_seek_second - 2));
-                //println!("ff: {:x}", aff);
-                //println!("amm: {:x}", amm);
-                //println!("ass: {:x}", u8_to_bcd(self.drive_seek_second));
-                //println!("aff: {:x}", aff);
             }
             0x13 => {
                 self.push_stat();
@@ -1140,7 +1166,7 @@ impl Cdrom {
                 self.second_response_mode = CdromSecondResponseMode::GetStat;
                 self.second_response_counter += 44100;
             }
-            _ => panic!("[CDROM] [ERROR] Unknown command 0x{:02x}", command),
+            _ => panic!("[CDROM] Unknown command 0x{:02x}", command),
         };
 
         self.controller_interrupt_flags = interrupt;
@@ -1223,7 +1249,6 @@ impl Cdrom {
             }
             1 => {
                 value = self.response_buffer.pop();
-                //println!("[CDROM] [INFO] Response 0x{:02x}", value);
             }
             2 => {
                 value = self.read_data();
