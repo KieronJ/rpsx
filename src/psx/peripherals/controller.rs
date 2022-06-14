@@ -48,10 +48,10 @@ impl Controller {
             button_cross: false,
             button_square: false,
 
-            axis_lx: 0,
-            axis_ly: 0,
-            axis_rx: 0,
-            axis_ry: 0,
+            axis_lx: 128,
+            axis_ly: 128,
+            axis_rx: 128,
+            axis_ry: 128,
         }
     }
 
