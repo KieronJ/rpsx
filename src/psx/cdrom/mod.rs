@@ -304,6 +304,9 @@ pub struct Cdrom {
     last_subq: CdromSubchannelQ,
 
     game_file: File,
+
+    sixstep: usize,
+    ringbuf: [[i16; 0x20]; 2],
 }
 
 impl Cdrom {
@@ -387,6 +390,9 @@ impl Cdrom {
             last_subq: CdromSubchannelQ::new(),
 
             game_file: File::open(path).unwrap(),
+
+            sixstep: 0,
+            ringbuf: [[0; 0x20]; 2],
         }
     }
 
@@ -766,8 +772,7 @@ impl Cdrom {
                 match mode {
                     CdromSectorMode::Adpcm => {
                         if subheader.bit_depth() != 4 {
-                            println!("[CDROM] [ERROR] Unsupported bit depth");
-                            panic!();
+                            panic!("[CDROM] [ERROR] Unsupported bit depth");
                         }
 
                         //DECODE XA-ADPCM
@@ -777,34 +782,28 @@ impl Cdrom {
                         let mut data = [0u8; 0x914];
                         self.game_file.read_exact(&mut data).unwrap();
 
-                        self.adpcm_prev_samples[0] = [0, 0];
-                        self.adpcm_prev_samples[1] = [0, 0];
-
                         for i in 0..0x12 {
                             self.decode_adpcm_blocks(&data[i * 0x80..], channels);
                         }
 
+                        let times = match sampling_rate {
+                            18900 => 2,
+                            37800 => 1,
+                            _ => unreachable!()
+                        };
+
                         for channel in 0..channels {
-                            let mut sixstep = 6;
-                            let mut ringbuf = [0; 0x20];
+                            for _ in 0..times {
+                                for i in 0..self.adpcm_buffers[channel].len() {
+                                    self.ringbuf[channel][i & 0x1f] = self.adpcm_buffers[channel][i];
+                                    self.sixstep += 1;
 
-                            for i in 0..self.adpcm_buffers[channel].len() {
-                                ringbuf[i & 0x1f] = self.adpcm_buffers[channel][i];
-                                sixstep -= 1;
+                                    if self.sixstep == 6 {
+                                        self.sixstep = 0;
 
-                                if sixstep == 0 {
-                                    sixstep = 6;
+                                        for j in 0..7 {
+                                            let sample = self.zigzag_interpolate(i + 1, self.ringbuf[channel], ADPCM_ZIGZAG_TABLE[j]);
 
-                                    for j in 0..7 {
-                                        let sample = self.zigzag_interpolate(i + 1, ringbuf, ADPCM_ZIGZAG_TABLE[j]);
-
-                                        let times = match sampling_rate {
-                                            18900 => 2,
-                                            37800 => 1,
-                                            _ => unreachable!()
-                                        };
-
-                                        for _ in 0..times {
                                             match (channel, channels) {
                                                 (_, 1) => spu.cd_push(sample, sample),
                                                 (0, 2) => spu.cd_push_left(sample),
