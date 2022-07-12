@@ -890,7 +890,7 @@ impl R3000A {
             0 => (current & 0x00ff_ffff) | (aligned << 24),
             1 => (current & 0x0000_ffff) | (aligned << 16),
             2 => (current & 0x0000_00ff) | (aligned << 8),
-            3 => aligned + 1,
+            3 => aligned,
             _ => unreachable!(),
         };
     }
