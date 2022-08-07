@@ -60,8 +60,8 @@ impl Frontend {
         let program;
         let mut texture = 0;
 
-        let fragment_shader = shader_from_source(&std::ffi::CString::new(include_str!("..\\shaders\\shader.frag")).unwrap(), gl::FRAGMENT_SHADER).unwrap();
-        let vertex_shader = shader_from_source(&std::ffi::CString::new(include_str!("..\\shaders\\shader.vert")).unwrap(), gl::VERTEX_SHADER).unwrap();
+        let fragment_shader = shader_from_source(&std::ffi::CString::new(include_str!("../shaders/shader.frag")).unwrap(), gl::FRAGMENT_SHADER).unwrap();
+        let vertex_shader = shader_from_source(&std::ffi::CString::new(include_str!("../shaders/shader.vert")).unwrap(), gl::VERTEX_SHADER).unwrap();
 
         unsafe {
             gl::Viewport(0, 0, width as i32, height as i32);
