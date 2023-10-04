@@ -7,16 +7,16 @@ use super::intc::{Intc, Interrupt};
 
 use crate::queue::Queue;
 
-struct PeripheralsMode {
+struct Mode {
     clk_output_polarity: bool,
     parity_type: bool,
     parity_enable: bool,
     baud_reload_factor: usize,
 }
 
-impl PeripheralsMode {
-    pub fn new() -> PeripheralsMode {
-        PeripheralsMode {
+impl Mode {
+    pub fn new() -> Mode {
+        Mode {
             clk_output_polarity: false,
             parity_type: false,
             parity_enable: false,
@@ -38,7 +38,7 @@ impl PeripheralsMode {
     }
 }
 
-struct PeripheralsControl {
+struct Control {
     slot: bool,
     ack_interrupt_enable: bool,
     rx_interrupt_enable: bool,
@@ -49,9 +49,9 @@ struct PeripheralsControl {
     tx_enable: bool,
 }
 
-impl PeripheralsControl {
-    pub fn new() -> PeripheralsControl {
-        PeripheralsControl {
+impl Control {
+    pub fn new() -> Control {
+        Control {
             slot: false,
             ack_interrupt_enable: false,
             rx_interrupt_enable: false,
@@ -97,7 +97,7 @@ impl PeripheralsControl {
 }
 
 #[derive(PartialEq)]
-enum PeripheralsSelect {
+enum Device {
     None,
     Controller,
     MemoryCard,
@@ -107,7 +107,7 @@ pub struct Peripherals {
     controller: Controller,
     mem_card1: MemoryCard,
 
-    select: PeripheralsSelect,
+    active_device: Device,
 
     baudrate: usize,
     ticks_left: isize,
@@ -121,8 +121,8 @@ pub struct Peripherals {
     tx_ready_2: bool,
     tx_ready_1: bool,
 
-    mode: PeripheralsMode,
-    control: PeripheralsControl,
+    mode: Mode,
+    control: Control,
 
     rx_fifo: Queue<u8>,
     tx_fifo: Queue<u8>,
@@ -134,7 +134,7 @@ impl Peripherals {
             controller: Controller::new(),
             mem_card1: MemoryCard::new("./cards/card1.mcd"),
 
-            select: PeripheralsSelect::None,
+            active_device: Device::None,
 
             baudrate: 0,
             ticks_left: 0,
@@ -148,8 +148,8 @@ impl Peripherals {
             tx_ready_2: false,
             tx_ready_1: false,
 
-            mode: PeripheralsMode::new(),
-            control: PeripheralsControl::new(),
+            mode: Mode::new(),
+            control: Control::new(),
 
             rx_fifo: Queue::<u8>::new(8),
             tx_fifo: Queue::<u8>::new(1),
@@ -162,7 +162,7 @@ impl Peripherals {
 
     pub fn reset_device_states(&mut self) {
         //println!("[SIO] resetting device states");
-        self.select = PeripheralsSelect::None;
+        self.active_device = Device::None;
         self.in_transfer = false;
         self.in_acknowledge = false;
         self.controller.reset_device_state();
@@ -186,11 +186,11 @@ impl Peripherals {
                 return;
             }
 
-            if self.select == PeripheralsSelect::None {
+            if self.active_device == Device::None {
                 if command == 0x01 {
-                    self.select = PeripheralsSelect::Controller;
+                    self.active_device = Device::Controller;
                 } else if command == 0x81 {
-                    self.select = PeripheralsSelect::MemoryCard;
+                    self.active_device = Device::MemoryCard;
                 }
             }
 
@@ -198,7 +198,7 @@ impl Peripherals {
             let mut ack = false;
             let mut enable = false;
 
-            if self.select == PeripheralsSelect::Controller {
+            if self.active_device == Device::Controller {
                 response = self.controller.response(command);
                 ack = self.controller.ack();
                 enable = self.controller.enable();
@@ -207,7 +207,7 @@ impl Peripherals {
                     self.ticks_left += 338;
                     self.in_acknowledge = true;
                 }
-            } else if self.select == PeripheralsSelect::MemoryCard {
+            } else if self.active_device == Device::MemoryCard {
                 response = self.mem_card1.response(command);
                 ack = self.mem_card1.ack();
                 enable = self.mem_card1.enable();
@@ -219,7 +219,7 @@ impl Peripherals {
             }
 
             if !enable {
-                self.select = PeripheralsSelect::None;
+                self.active_device = Device::None;
             }
 
             self.rx_fifo.push(response);
