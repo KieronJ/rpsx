@@ -1,12 +1,12 @@
-use std::fs::{File, OpenOptions};
+use std::fs;
 use std::io::prelude::{Read, Write};
 use std::os::windows::prelude::FileExt;
-use std::path::Path;
+use std::path;
 
 pub const MEMORY_CARD_SIZE: usize = 0x20000;
 
 pub struct MemoryCard {
-    file: File,
+    file: fs::File,
     cache: Box<[u8]>,
     dirty: bool,
 
@@ -56,29 +56,30 @@ impl MemoryCard {
         self.state = 0;
     }
 
-    fn get_card_file(filepath: &'static str) -> File {
-        let path = Path::new(filepath);
+    fn get_card_file(filepath: &'static str) -> fs::File {
+        let path = path::Path::new(filepath);
 
-        if !path.exists() {
-            MemoryCard::create_file(&path);
+        // This should only be None if the path is at the root right?
+        if let Some(parent) = path.parent() {
+            fs::create_dir_all(parent).expect("unable to create path to memory card file");
         }
 
-        OpenOptions::new()
+        fs::OpenOptions::new()
             .read(true)
             .write(true)
             .create(true)
             .open(filepath)
-            .unwrap()
-    }
-
-    fn create_file(path: &Path) {
-        let f = File::create(path).unwrap();
-        f.set_len(MEMORY_CARD_SIZE as u64).unwrap();
+            .expect("unable to create/open memory card file")
     }
 
     fn load_cache(&mut self) {
-        self.file.read_exact(&mut self.cache).unwrap();
-        self.dirty = false;
+        let metadata = self.file.metadata().unwrap();
+
+        // Forgo loading card data if file is smaller than expected (presumably empty)
+        if metadata.len() >= MEMORY_CARD_SIZE as u64 {
+            self.file.read_exact(&mut self.cache).unwrap();
+            self.dirty = false;
+        }
     }
 
     fn flush_cache(&mut self) {
