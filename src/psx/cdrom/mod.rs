@@ -911,7 +911,7 @@ impl Cdrom {
             panic!("[CDC] Invalid command {}", command);
         }
 
-        println!("[CDC] {}", COMMAND_NAMES[command as usize]);
+        //println!("[CDC] {}", COMMAND_NAMES[command as usize]);
 
         let mut interrupt = 0x3;
 
@@ -926,7 +926,7 @@ impl Cdrom {
                 let ss = self.controller_parameter_buffer.pop();
                 let ff = self.controller_parameter_buffer.pop();
 
-                println!("({:02x}, {:02x}, {:02x})", mm, ss, ff);
+                //println!("({:02x}, {:02x}, {:02x})", mm, ss, ff);
 
                 self.seek_unprocessed = true;
 
