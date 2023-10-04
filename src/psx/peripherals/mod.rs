@@ -160,9 +160,14 @@ impl Peripherals {
         self.mem_card1.reset();
     }
 
-    // static constexpr size_t kAcknowledgeDelay = 338;
-    // m_transfer_event->Reschedule((m_baudrate & ~1) * 8);
-    // m_transfer_event->Reschedule(kAcknowledgeDelay);
+    pub fn reset_device_states(&mut self) {
+        //println!("[SIO] resetting device states");
+        self.select = PeripheralsSelect::None;
+        self.in_transfer = false;
+        self.in_acknowledge = false;
+        self.controller.reset_device_state();
+        self.mem_card1.reset_device_state();
+    }
 
     pub fn tick(&mut self, intc: &mut Intc, clocks: usize) {
         if self.in_transfer {
@@ -199,19 +204,19 @@ impl Peripherals {
                 enable = self.controller.enable();
 
                 if ack {
-                    self.ticks_left = 338 + self.ticks_left;
+                    self.ticks_left += 338;
+                    self.in_acknowledge = true;
+                }
+            } else if self.select == PeripheralsSelect::MemoryCard {
+                response = self.mem_card1.response(command);
+                ack = self.mem_card1.ack();
+                enable = self.mem_card1.enable();
+
+                if ack {
+                    self.ticks_left += 338;
                     self.in_acknowledge = true;
                 }
             }
-            //} else if self.select == PeripheralsSelect::MemoryCard {
-            //    response = self.mem_card1.response(command);
-            //    ack = self.mem_card1.ack();
-            //    enable = self.mem_card1.enable();
-//
-            //    if ack {
-            //        self.interrupt_timer = 700;
-            //    }
-            //}
 
             if !enable {
                 self.select = PeripheralsSelect::None;
@@ -280,6 +285,10 @@ impl Peripherals {
 
     pub fn write_control(&mut self, value: u16) {
         self.control.write(value);
+
+        if !self.control.joy_n_output {
+            self.reset_device_states();
+        }
 
         if (value & 0x40) != 0 {
             self.write_mode(0);

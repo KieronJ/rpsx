@@ -1,5 +1,6 @@
 use std::fs::{File, OpenOptions};
 use std::io::prelude::{Read, Write};
+use std::os::windows::prelude::FileExt;
 use std::path::Path;
 
 pub const MEMORY_CARD_SIZE: usize = 0x20000;
@@ -50,6 +51,11 @@ impl MemoryCard {
         self.flag = 0x08;
     }
 
+    pub fn reset_device_state(&mut self) {
+        self.ack = false;
+        self.state = 0;
+    }
+
     fn get_card_file(filepath: &'static str) -> File {
         let path = Path::new(filepath);
 
@@ -60,6 +66,7 @@ impl MemoryCard {
         OpenOptions::new()
             .read(true)
             .write(true)
+            .create(true)
             .open(filepath)
             .unwrap()
     }
@@ -75,7 +82,7 @@ impl MemoryCard {
     }
 
     fn flush_cache(&mut self) {
-        self.file.write_all(&self.cache).unwrap();
+        self.file.seek_write(&self.cache, 0).unwrap();
         self.file.flush().unwrap();
         self.dirty = false;
     }
@@ -175,7 +182,7 @@ impl MemoryCard {
 
                 self.checksum ^= command;
 
-                println!("[MCD] [INFO] Set sector to: {:#x}", self.sector);
+                //println!("[MCD] [INFO] [R] Set sector to: {:#x}", self.sector);
 
                 if self.sector > 0x3ff {
                     self.sector = 0xffff;
@@ -198,7 +205,7 @@ impl MemoryCard {
             17 => {
                 reply = self.sector as u8;
 
-                println!("[MCD] [INFO] Reading sector: {:#x}", self.sector);
+                //println!("[MCD] [INFO] Reading sector: {:#x}", self.sector);
 
                 if self.sector == 0xffff {
                     self.state = 0;
@@ -224,6 +231,7 @@ impl MemoryCard {
                 self.state = 20;
             },
             20 => {
+                //println!("[MCD] [INFO] [R] finishing transfer");
                 reply = 0x47;
                 self.state = 0;
                 self.ack = false;
@@ -257,7 +265,7 @@ impl MemoryCard {
                 self.previous = command;
                 self.checksum ^= command;
 
-                println!("[MCD] [INFO] Set sector to: {:#x}", self.sector);
+                //println!("[MCD] [INFO] [W] Set sector to: {:#x}", self.sector);
 
                 if self.sector > 0x3ff {
                     self.state = 0;
@@ -284,7 +292,8 @@ impl MemoryCard {
             26 => {
                 reply = self.previous;
 
-                println!("[MCD] [INFO] Written sector: {:#x}", self.sector);
+                //println!("[MCD] [INFO] Written sector: {:#x}", self.sector);
+                self.sync();
 
                 self.checksum_match = self.checksum == command;
                 self.state = 27;

@@ -55,6 +55,10 @@ impl Controller {
         }
     }
 
+    pub fn reset_device_state(&mut self) {
+        self.state = 0;
+    }
+
     pub fn response(&mut self, command: u8) -> u8 {
         let mut reply = 0xff;
 
