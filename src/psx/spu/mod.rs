@@ -6,6 +6,8 @@ mod volume;
 
 use std::collections::VecDeque;
 
+use serde::{Deserialize, Serialize};
+
 use crate::util::{clip, f32_to_i16, i16_to_f32};
 
 use super::intc::{Intc, Interrupt};
@@ -30,7 +32,7 @@ const NOISE_WAVE_TABLE: [isize; 64] = [
 
 const NOISE_FREQ_TABLE: [isize; 5] = [0, 84, 140, 180, 210];
 
-#[derive(Clone, Copy, PartialEq)]
+#[derive(Clone, Copy, Deserialize, PartialEq, Serialize)]
 enum SpuTransferMode {
     Stop,
     ManualWrite,
@@ -58,7 +60,7 @@ impl From<u16> for SpuTransferMode {
     }
 }
 
-#[derive(Default)]
+#[derive(Default, Deserialize, Serialize)]
 struct SpuControl {
     enable: bool,
     mute: bool,
@@ -106,7 +108,7 @@ impl SpuControl {
     }
 }
 
-#[derive(Default)]
+#[derive(Default, Deserialize, Serialize)]
 struct SpuDataTransfer {
     address: u32,
     current: u32,
@@ -116,6 +118,7 @@ struct SpuDataTransfer {
     control: u16,
 }
 
+#[derive(Deserialize, Serialize)]
 pub struct SpuRam {
     data: Box<[u16]>,
 
@@ -171,6 +174,7 @@ impl SpuRam {
     }
 }
 
+#[derive(Deserialize, Serialize)]
 pub struct Spu {
     output_buffer: Vec<i16>,
 

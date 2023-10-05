@@ -1,11 +1,15 @@
 pub mod controller;
 mod memory_card;
 
+use serde::{Deserialize, Serialize};
+
 use self::controller::Controller;
 use self::memory_card::MemoryCard;
 use super::intc::{Intc, Interrupt};
 
 use crate::queue::Queue;
+
+#[derive(Deserialize, Serialize)]
 
 struct Mode {
     clk_output_polarity: bool,
@@ -37,6 +41,8 @@ impl Mode {
         };
     }
 }
+
+#[derive(Deserialize, Serialize)]
 
 struct Control {
     slot: bool,
@@ -96,13 +102,14 @@ impl Control {
     }
 }
 
-#[derive(PartialEq)]
+#[derive(Deserialize, PartialEq, Serialize)]
 enum Device {
     None,
     Controller,
     MemoryCard,
 }
 
+#[derive(Deserialize, Serialize)]
 pub struct Peripherals {
     controller: Controller,
     mem_card1: MemoryCard,
@@ -167,6 +174,10 @@ impl Peripherals {
         self.in_acknowledge = false;
         self.controller.reset_device_state();
         self.mem_card1.reset_device_state();
+    }
+
+    pub fn load_memcards(&mut self) {
+        self.mem_card1.load("./cards/card1.mcd");
     }
 
     pub fn tick(&mut self, intc: &mut Intc, clocks: usize) {

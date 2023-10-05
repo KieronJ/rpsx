@@ -1,28 +1,29 @@
 use byteorder::{ByteOrder, LittleEndian};
+use serde::{Deserialize, Serialize};
 
 use super::Bus;
 use super::super::intc::{Intc, Interrupt};
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Deserialize, Serialize)]
 pub enum SyncMode {
     Manual,
     Request,
     LinkedList,
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Deserialize, Serialize)]
 pub enum Step {
     Forward,
     Backward,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Serialize)]
 pub enum Direction {
     ToRam,
     FromRam,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Serialize)]
 pub enum DmacPort {
     MDECIn,
     MDECOut,
@@ -67,7 +68,7 @@ impl DmacPort {
     }
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Deserialize, Serialize)]
 pub struct DmacChannel {
     base_address: u32,
 
@@ -200,6 +201,7 @@ impl DmacChannel {
     }
 }
 
+#[derive(Deserialize, Serialize)]
 pub struct Dmac {
     channels: [DmacChannel; 7],
     control: u32,
@@ -220,7 +222,7 @@ impl Dmac {
             channels: [DmacChannel::new(); 7],
             control: 0x07654321,
             interrupt: 0,
-            
+
             gap_ticks: 0,
             gap_started: false,
 

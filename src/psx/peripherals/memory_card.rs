@@ -3,10 +3,15 @@ use std::io::prelude::{Read, Write};
 use std::os::windows::prelude::FileExt;
 use std::path;
 
+use serde::{Deserialize, Serialize};
+
 pub const MEMORY_CARD_SIZE: usize = 0x20000;
 
+#[derive(Deserialize, Serialize)]
+
 pub struct MemoryCard {
-    file: fs::File,
+    #[serde(skip)]
+    file: Option<fs::File>,
     cache: Box<[u8]>,
     dirty: bool,
 
@@ -26,7 +31,7 @@ pub struct MemoryCard {
 impl MemoryCard {
     pub fn new(filepath: &'static str) -> MemoryCard {
         let mut card = MemoryCard {
-            file: MemoryCard::get_card_file(filepath),
+            file: Some(MemoryCard::get_card_file(filepath)),
             cache: vec![0; MEMORY_CARD_SIZE].into_boxed_slice(),
             dirty: false,
 
@@ -56,7 +61,7 @@ impl MemoryCard {
         self.state = 0;
     }
 
-    fn get_card_file(filepath: &'static str) -> fs::File {
+    fn get_card_file(filepath: &str) -> fs::File {
         let path = path::Path::new(filepath);
 
         // This should only be None if the path is at the root right?
@@ -72,19 +77,25 @@ impl MemoryCard {
             .expect("unable to create/open memory card file")
     }
 
+    pub fn load(&mut self, filepath: &str) {
+        self.file = Some(MemoryCard::get_card_file(filepath));
+    }
+
     fn load_cache(&mut self) {
-        let metadata = self.file.metadata().unwrap();
+        let file = self.file.as_mut().expect("no memcard file");
+        let metadata = file.metadata().unwrap();
 
         // Forgo loading card data if file is smaller than expected (presumably empty)
         if metadata.len() >= MEMORY_CARD_SIZE as u64 {
-            self.file.read_exact(&mut self.cache).unwrap();
+            file.read_exact(&mut self.cache).unwrap();
             self.dirty = false;
         }
     }
 
     fn flush_cache(&mut self) {
-        self.file.seek_write(&self.cache, 0).unwrap();
-        self.file.flush().unwrap();
+        let file = self.file.as_mut().expect("no memcard file");
+        file.seek_write(&self.cache, 0).unwrap();
+        file.flush().unwrap();
         self.dirty = false;
     }
 

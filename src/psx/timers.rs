@@ -1,7 +1,10 @@
 use std::cmp;
 
+use serde::{Deserialize, Serialize};
+
 use super::intc::{Intc, Interrupt};
 
+#[derive(Deserialize, Serialize)]
 pub struct Counter {
     value: u32,
     mode: u32,
@@ -88,6 +91,7 @@ impl Counter {
     }
 }
 
+#[derive(Deserialize, Serialize)]
 pub struct Timers {
     counter: [Counter; 3],
 

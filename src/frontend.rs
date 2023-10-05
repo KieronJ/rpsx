@@ -1,8 +1,14 @@
+use std::fs::{self, File};
+use std::io::{Read, Write};
+use std::path::Path;
 use std::time::Instant;
 
 use sdl2::controller::{Axis, Button};
 use sdl2::event::{Event, WindowEvent};
 use sdl2::keyboard::Keycode;
+
+use xz2::read::XzDecoder;
+use xz2::write::XzEncoder;
 
 use crate::{Options, Scaling};
 use crate::psx::System;
@@ -26,7 +32,7 @@ pub struct Frontend {
 
     event_pump: sdl2::EventPump,
 
-    controller: Option<sdl2::controller::GameController>,
+    _controller: Option<sdl2::controller::GameController>,
 
     vao: gl::types::GLuint,
     vbo: gl::types::GLuint,
@@ -43,11 +49,11 @@ pub struct Frontend {
 }
 
 impl Frontend {
-    pub fn create(ctx_temp: &mut sdl2::Sdl, width: u32, height: u32, title: &str) -> Self {
+    pub fn create(ctx_temp: &mut sdl2::Sdl, width: u32, height: u32) -> Self {
         let video = ctx_temp.video().unwrap();
         let ctr = ctx_temp.game_controller().unwrap();
 
-        let window = video.window(title, width, height)
+        let window = video.window("rpsx", width, height)
             .resizable()
             .opengl()
             .build()
@@ -112,7 +118,7 @@ impl Frontend {
 
             event_pump: ctx_temp.event_pump().unwrap(),
 
-            controller: controller,
+            _controller: controller,
 
             vao: vao,
             vbo: vbo,
@@ -157,6 +163,10 @@ impl Frontend {
                 _ => {},
             };
         }
+
+        let id = system.get_disc_id();
+        let title = format!("rpsx - {} - slot {}", id, options.state_index);
+        self.window.set_title(&title).expect("unable to set window title");
     }
 
     fn handle_controller_button(button: Button, down: bool, system: &mut System) {
@@ -198,11 +208,10 @@ impl Frontend {
             Axis::RightY => controller.axis_ry = normalised,
             Axis::TriggerLeft => controller.button_l2 = normalised >= 192,
             Axis::TriggerRight => controller.button_r2 = normalised >= 192,
-            _ => (),
         }
     }
 
-    fn handle_keydown(keycode: Keycode, options: &mut Options, system: &mut System) {
+    fn handle_keydown(keycode: Keycode, _options: &mut Options, system: &mut System) {
         let controller = system.get_controller();
 
         match keycode {
@@ -238,6 +247,13 @@ impl Frontend {
                     Scaling::Fullscreen => Scaling::None
                 };
             }
+            Keycode::F6 => Frontend::load_state(system, options.state_index),
+            Keycode::F7 => Frontend::save_state(system, options.state_index),
+            Keycode::Comma => {
+                options.state_index += 1;
+                options.state_index %= 10;
+                println!("choosing save slot {}...", options.state_index);
+            },
             Keycode::F8 => options.draw_full_vram ^= true,
             Keycode::P => options.pause ^= true,
 
@@ -257,6 +273,53 @@ impl Frontend {
             Keycode::Num4 => controller.button_r2 = false,
             _ => {},
         };
+    }
+
+    fn load_state(system: &mut System, index: usize) {
+        println!("Loading state {}...", index);
+
+        let id = system.get_disc_id_raw();
+        let name = format!("./states/{id}_slot{index}.state");
+        let path = Path::new(&name);
+
+        if !path.exists() {
+            println!("No file for save state {}", index);
+            return;
+        }
+
+        if let Ok(file) = File::open(path) {
+            let mut bytes = Vec::new();
+            let mut decompressor = XzDecoder::new(file);
+            decompressor.read_to_end(&mut bytes).unwrap();
+            *system = rmp_serde::from_slice(&bytes).unwrap();
+            system.reload_host_files();
+            system.get_controller().reset_switch_state();
+            println!("DONE!");
+        } else {
+            println!("unable to create save state file");
+        }
+    }
+
+    fn save_state(system: &mut System, index: usize) {
+        println!("Saving state {}...", index);
+
+        let id = system.get_disc_id_raw();
+        let name = format!("./states/{id}_slot{index}.state");
+        let path = Path::new(&name);
+
+        if let Some(parent) = path.parent() {
+            fs::create_dir_all(parent).expect("unable to create path to save state file");
+        }
+
+        if let Ok(file) = File::create(path) {
+            let bytes = rmp_serde::to_vec(system).expect("unable to serialize state");
+            let mut compressor = XzEncoder::new(file, 6);
+            compressor.write_all(&bytes).unwrap();
+            compressor.finish().unwrap();
+            println!("DONE!");
+        } else {
+            println!("Unable to create save state file");
+        }
     }
 
     pub fn render(&mut self, options: &Options, system: &System) {

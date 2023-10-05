@@ -62,6 +62,8 @@ pub struct Options {
     step: bool,
 
     frame_limit: bool,
+
+    state_index: usize,
 }
 
 fn main() {
@@ -90,17 +92,19 @@ fn main() {
         step: false,
 
         frame_limit: true,
+
+        state_index: 0,
     };
 
     let mut sdl_ctx_temp = sdl2::init().unwrap();
     let mut audio = AudioInterface::new(&mut sdl_ctx_temp, 44100, 2, 512);
-    let mut frontend = Frontend::create(&mut sdl_ctx_temp, 640, 480, "rpsx");
-    
+    let mut frontend = Frontend::create(&mut sdl_ctx_temp, 640, 480);
+
     // Disabled due to Dear ImGui version bump
     //let mut gui = Gui::new(&video.display);
     //let mut gpu_frame = GpuFrame::new();
 
-    let mut system = System::new(&bios_filepath, &game_filepath);
+    let mut system = System::new(bios_filepath.to_string(), game_filepath.to_string());
     system.reset();
 
     audio.play();

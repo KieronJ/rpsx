@@ -1,4 +1,6 @@
-#[derive(Clone, Copy)]
+use serde::{Deserialize, Serialize};
+
+#[derive(Clone, Copy, Deserialize, Serialize)]
 pub struct GpuVertex {
     pub position: (i16, i16),
     pub texcoord: (u8, u8),
@@ -45,6 +47,7 @@ impl GpuVertex {
     }
 }
 
+#[derive(Deserialize, Serialize)]
 pub struct GpuPolygon {
     pub vertices: [GpuVertex; 4],
     pub texpage: u16,
@@ -71,6 +74,7 @@ impl GpuPolygon {
     }
 }
 
+#[derive(Deserialize, Serialize)]
 pub enum GpuCommand {
     Polygon(GpuPolygon),
 }
@@ -94,6 +98,7 @@ impl GpuCommand {
     }
 }
 
+#[derive(Deserialize, Serialize)]
 pub struct GpuFrame {
     pub commands: Vec<GpuCommand>,
 }

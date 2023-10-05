@@ -7,6 +7,8 @@ use std::fs::File;
 use std::io::{Read, Seek, SeekFrom};
 use std::path::Path;
 
+use serde::{Deserialize, Serialize};
+
 use timecode::Timecode;
 
 use crate::psx::adpcm::{ADPCM_FILTERS, ADPCM_ZIGZAG_TABLE};
@@ -19,6 +21,7 @@ use super::spu::Spu;
 pub const SECTORS_PER_SECOND: u64 = 75;
 pub const SECTORS_PER_MINUTE: u64 = 60 * SECTORS_PER_SECOND;
 pub const BYTES_PER_SECTOR: u64 = 2352;
+pub const SECTOR_HEADER_SIZE: u64 = 24;
 pub const LEAD_IN_SECTORS: u64 = 2 * SECTORS_PER_SECOND;
 
 pub const ADDRESS_OFFSET: usize = 12;
@@ -32,7 +35,7 @@ enum CdromSubheaderMode {
     Invalid,
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Deserialize, Serialize)]
 struct CdromSubheader {
     file: u8,
     channel: u8,
@@ -99,7 +102,7 @@ impl CdromSubheader {
     }
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Deserialize, Serialize)]
 struct CdromHeader {
     minute: u8,
     second: u8,
@@ -127,6 +130,7 @@ impl CdromHeader {
     }
 }
 
+#[derive(Deserialize, Serialize)]
 struct CdromSubchannelQ {
     pub track: u8,
     pub index: u8,
@@ -153,7 +157,7 @@ impl CdromSubchannelQ {
     }
 }
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, Deserialize, Serialize)]
 enum CdromIndex {
     Index0,
     Index1,
@@ -161,7 +165,7 @@ enum CdromIndex {
     Index3,
 }
 
-#[derive(Clone, Copy, PartialEq)]
+#[derive(Clone, Copy, Deserialize, PartialEq, Serialize)]
 enum CdromControllerMode {
     Idle,
     ParameterTransfer,
@@ -172,7 +176,7 @@ enum CdromControllerMode {
     InterruptTransfer,
 }
 
-#[derive(Clone, Copy, PartialEq)]
+#[derive(Clone, Copy, Deserialize, PartialEq, Serialize)]
 enum CdromDriveMode {
     Idle,
     GetStat,
@@ -181,7 +185,7 @@ enum CdromDriveMode {
     Play,
 }
 
-#[derive(Clone, Copy, PartialEq)]
+#[derive(Clone, Copy, Deserialize, PartialEq, Serialize)]
 enum CdromSecondResponseMode {
     Idle,
     GetID,
@@ -230,7 +234,7 @@ static COMMAND_NAMES: [&'static str; 32] = [
     "? 0x1f"
 ];
 
-
+#[derive(Deserialize, Serialize)]
 pub struct Cdrom {
     index: CdromIndex,
 
@@ -303,7 +307,8 @@ pub struct Cdrom {
 
     last_subq: CdromSubchannelQ,
 
-    game_file: File,
+    #[serde(skip)]
+    game_file: Option<File>,
 
     sixstep: usize,
     ringbuf: [[i16; 0x20]; 2],
@@ -389,7 +394,7 @@ impl Cdrom {
 
             last_subq: CdromSubchannelQ::new(),
 
-            game_file: File::open(path).unwrap(),
+            game_file: Some(File::open(path).unwrap()),
 
             sixstep: 0,
             ringbuf: [[0; 0x20]; 2],
@@ -397,6 +402,45 @@ impl Cdrom {
     }
 
     pub fn reset(&mut self) {
+    }
+
+    pub fn load_disc(&mut self, filepath: &str) {
+        let path = Path::new(filepath);
+
+        if !path.is_file() {
+            panic!("ERROR: file does not exist: {}", path.display())
+        }
+
+        self.game_file = Some(File::open(path).unwrap());
+    }
+
+    // TODO: It's stupid to read this every time,
+    // make it an Option<String> and invalidate if the disc is changed.
+    pub fn get_disc_id(&mut self) -> String {
+        if self.game_file.is_none() {
+            return String::from("NODISC");
+        }
+
+        let mut pvd = [0u8; 2048];
+        let file = self.game_file.as_mut().unwrap();
+
+        // Load the primary volume descriptor from the disc
+        file.seek(SeekFrom::Start(16 * BYTES_PER_SECTOR + SECTOR_HEADER_SIZE)).unwrap();
+        file.read_exact(&mut pvd).unwrap();
+
+        assert_eq!(pvd[0], 0x1);   // This must be of type PVD
+        assert_ne!(pvd[40], 0x20); // The volume identifier must not be empty
+
+        // Read the volume identifier and strip spaces/other junk.
+        let mut id: String = String::from_utf8_lossy(&pvd[40..72]).to_string();
+        id.retain(|c| !c.is_whitespace());
+        id
+    }
+
+    pub fn get_disc_id_raw(&mut self) -> String {
+        let mut id = self.get_disc_id();
+        id.retain(|c| c.is_alphanumeric());
+        id.to_ascii_lowercase()
     }
 
     pub fn tick(&mut self, intc: &mut Intc, spu: &mut Spu, clocks: usize) {
@@ -425,7 +469,7 @@ impl Cdrom {
                         self.controller_mode = CdromControllerMode::CommandTransfer;
                     }
                 }
-                
+
                 self.controller_counter += clocks as isize;
             }
             CdromControllerMode::ParameterTransfer => {
@@ -613,10 +657,14 @@ impl Cdrom {
                 }
 
                 let cursor = self.get_seek_location();
-                self.game_file.seek(SeekFrom::Start(cursor)).unwrap();
-
                 let mut data = [0u8; 0x930];
-                self.game_file.read_exact(&mut data);
+
+                if let Some(file) = self.game_file.as_mut() {
+                    file.seek(SeekFrom::Start(cursor)).unwrap();
+                    file.read_exact(&mut data).unwrap();
+                } else {
+                    panic!("no game file");
+                }
 
                 for i in 0..0x24c {
                     let left = (data[i * 4] as u16) | ((data[i * 4 + 1] as u16) << 8);
@@ -699,10 +747,14 @@ impl Cdrom {
                 self.data_busy = true;
 
                 let cursor = self.get_seek_location();
-                self.game_file.seek(SeekFrom::Start(cursor)).unwrap();
-
                 let mut info = [0u8; 0x18];
-                self.game_file.read_exact(&mut info).unwrap();
+
+                if let Some(file) = self.game_file.as_mut() {
+                    file.seek(SeekFrom::Start(cursor)).unwrap();
+                    file.read_exact(&mut info).unwrap();
+                } else {
+                    panic!("no game file");
+                }
 
                 let header = CdromHeader::from_slice(&info[0xc..]);
                 let subheader = CdromSubheader::from_slice(&info[0x10..]);
@@ -780,7 +832,12 @@ impl Cdrom {
                         let sampling_rate = subheader.sampling_rate();
 
                         let mut data = [0u8; 0x914];
-                        self.game_file.read_exact(&mut data).unwrap();
+
+                        if let Some(file) = self.game_file.as_mut() {
+                            file.read_exact(&mut data).unwrap();
+                        } else {
+                            panic!("no game file");
+                        }
 
                         for i in 0..0x12 {
                             self.decode_adpcm_blocks(&data[i * 0x80..], channels);
@@ -820,8 +877,12 @@ impl Cdrom {
                         self.adpcm_buffers[1].clear();
                     }
                     CdromSectorMode::Data => {
-                        self.game_file.seek(SeekFrom::Start(cursor)).unwrap();
-                        self.game_file.read_exact(&mut self.sector).unwrap();
+                        if let Some(file) = self.game_file.as_mut() {
+                            file.seek(SeekFrom::Start(cursor)).unwrap();
+                            file.read_exact(&mut self.sector).unwrap();
+                        } else {
+                            panic!("no game file");
+                        }
 
                         // TODO: stat
                         if self.drive_interrupt_pending {
@@ -867,7 +928,7 @@ impl Cdrom {
                 2 => i & 0x1,
                 _ => unreachable!(),
             };
-            
+
             self.decode_adpcm_block(data, channel, i);
         }
     }

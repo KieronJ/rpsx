@@ -1,6 +1,8 @@
 use std::cmp;
 
-#[derive(Clone, Copy)]
+use serde::{Deserialize, Serialize};
+
+#[derive(Clone, Copy, Deserialize, Serialize)]
 struct GteMatrix {
     m11: i16,
     m12: i16,
@@ -29,7 +31,7 @@ impl GteMatrix {
     }
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Deserialize, Serialize)]
 struct GteVector2 {
     x: i16,
     y: i16,
@@ -41,7 +43,7 @@ impl GteVector2 {
     }
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Deserialize, Serialize)]
 struct GteVector3 {
     x: i16,
     y: i16,
@@ -54,7 +56,7 @@ impl GteVector3 {
     }
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Deserialize, Serialize)]
 struct GteVector3_32 {
     x: i32,
     y: i32,
@@ -67,7 +69,7 @@ impl GteVector3_32 {
     }
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Deserialize, Serialize)]
 struct GteRgb {
     r: u8,
     g: u8,
@@ -103,9 +105,10 @@ const UNR_TABLE: [u8; 0x101] = [
     0x19, 0x19, 0x18, 0x18, 0x17, 0x16, 0x16, 0x15, 0x15, 0x14, 0x14, 0x13, 0x12, 0x12, 0x11, 0x11,
     0x10, 0x0F, 0x0F, 0x0E, 0x0E, 0x0D, 0x0D, 0x0C, 0x0C, 0x0B, 0x0A, 0x0A, 0x09, 0x09, 0x08, 0x08,
     0x07, 0x07, 0x06, 0x06, 0x05, 0x05, 0x04, 0x04, 0x03, 0x03, 0x02, 0x02, 0x01, 0x01, 0x00, 0x00,
-    0x00 
+    0x00
 ];
 
+#[derive(Deserialize, Serialize)]
 pub struct Gte {
     sf: usize,
     mx: usize,
@@ -614,7 +617,7 @@ impl Gte {
 		let lm1 = self.lm_b(1, mac1, false) as i64;
 		let lm2 = self.lm_b(2, mac2, false) as i64;
 		let lm3 = self.lm_b(3, mac3, false) as i64;
-		
+
         self.mac[1] = (self.a(1, r * ir1 + ir0 * lm1) >> self.sf) as i32;
         self.mac[2] = (self.a(2, g * ir2 + ir0 * lm2) >> self.sf) as i32;
         self.mac[3] = (self.a(3, b * ir3 + ir0 * lm3) >> self.sf) as i32;
@@ -697,7 +700,7 @@ impl Gte {
 		let lm1 = self.lm_b(1, mac1, false) as i64;
 		let lm2 = self.lm_b(2, mac2, false) as i64;
 		let lm3 = self.lm_b(3, mac3, false) as i64;
-		
+
         self.mac[1] = (self.a(1, r * ir1 + ir0 * lm1) >> self.sf) as i32;
         self.mac[2] = (self.a(2, g * ir2 + ir0 * lm2) >> self.sf) as i32;
         self.mac[3] = (self.a(3, b * ir3 + ir0 * lm3) >> self.sf) as i32;

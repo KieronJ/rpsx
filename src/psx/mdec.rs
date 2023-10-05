@@ -1,6 +1,9 @@
 use std::collections::VecDeque;
 use std::mem;
 
+use serde::{Deserialize, Serialize};
+use serde_big_array::BigArray;
+
 use crate::util;
 
 const MDEC_BLK_CR: usize = 0;
@@ -21,13 +24,47 @@ const MDEC_ZAGZIG: [usize; 64] = [
     53, 60, 61, 54, 47, 55, 62, 63,
 ];
 
+#[derive(Clone, Copy, Deserialize, Serialize)]
+struct QuantTable {
+    #[serde(with = "BigArray")]
+    data: [u8; 64],
+}
+
+impl QuantTable {
+    pub fn new() -> QuantTable {
+        QuantTable {
+            data: [0; 64],
+        }
+    }
+}
+
+#[derive(Clone, Copy, Deserialize, Serialize)]
+struct Block {
+    #[serde(with = "BigArray")]
+    data: [i16; 64],
+}
+
+impl Block {
+    pub fn new() -> Block {
+        Block {
+            data: [0; 64],
+        }
+    }
+}
+
+#[derive(Deserialize, Serialize)]
 pub struct Mdec {
     data_out: VecDeque<u8>,
     data_in: VecDeque<u16>,
 
-    quant_tables: [[u8; 64]; 2],
+    #[serde(with = "BigArray")]
+    quant_tables: [QuantTable; 2],
+
+    #[serde(with = "BigArray")]
     scale_table: [i16; 64],
-    blocks: [[i16; 64]; 3],
+
+    #[serde(with = "BigArray")]
+    blocks: [Block; 3],
 
     processing_command: bool,
     command: usize,
@@ -53,9 +90,9 @@ impl Mdec {
             data_out: VecDeque::new(),
             data_in: VecDeque::new(),
 
-            quant_tables: [[0; 64]; 2],
+            quant_tables: [QuantTable::new(); 2],
             scale_table: [0; 64],
-            blocks: [[0; 64]; 3],
+            blocks: [Block::new(); 3],
 
             processing_command: false,
             command: 0,
@@ -87,7 +124,7 @@ impl Mdec {
         let quant = self.quant_tables[qt];
 
         for i in 0..64 {
-            self.blocks[blk][i] = 0;
+            self.blocks[blk].data[i] = 0;
         }
 
         if self.data_in.is_empty() {
@@ -106,7 +143,7 @@ impl Mdec {
         }
 
         let quant_factor = data >> 10;
-        let mut dc = (util::sign_extend_u16(data & 0x3ff, 10) as i16) * quant[k] as i16;
+        let mut dc = (util::sign_extend_u16(data & 0x3ff, 10) as i16) * quant.data[k] as i16;
 
         loop {
             if quant_factor == 0 {
@@ -116,9 +153,9 @@ impl Mdec {
             dc = util::clip(dc, -0x400, 0x3ff);
 
             if quant_factor > 0 {
-                self.blocks[blk][MDEC_ZAGZIG[k]] = dc;
+                self.blocks[blk].data[MDEC_ZAGZIG[k]] = dc;
             } else if quant_factor == 0 {
-                self.blocks[blk][k] = dc;
+                self.blocks[blk].data[k] = dc;
             }
 
             if self.data_in.is_empty() {
@@ -130,7 +167,7 @@ impl Mdec {
             k += (data >> 10) as usize + 1;
 
             if k <= 63 {
-                dc = ((util::sign_extend_u16(data & 0x3ff, 10) as i16) * (quant[k] as i16) * (quant_factor as i16) + 4) >> 3;
+                dc = ((util::sign_extend_u16(data & 0x3ff, 10) as i16) * (quant.data[k] as i16) * (quant_factor as i16) + 4) >> 3;
                 continue;
             }
 
@@ -152,28 +189,28 @@ impl Mdec {
                     let mut sum = 0;
 
                     for z in 0..8 {
-                        sum += (src[y + z * 8] as i32) * ((self.scale_table[x + z * 8] as i32) >> 3);
+                        sum += (src.data[y + z * 8] as i32) * ((self.scale_table[x + z * 8] as i32) >> 3);
                     }
-                    
+
                     dst[x + y * 8] = ((sum + 0xfff) >> 13) as i16;
                 }
             }
 
-            mem::swap(src, dst);
+            mem::swap(&mut src.data, dst);
         }
     }
 
     fn yuv_to_rgb(&mut self, output: &mut [u8], xx: usize, yy: usize) {
         for y in 0..8 {
             for x in 0..8 {
-                let mut r = self.blocks[MDEC_BLK_CR][((x + xx) >> 1) + ((y + yy) >> 1) * 8];
-                let mut b = self.blocks[MDEC_BLK_CB][((x + xx) >> 1) + ((y + yy) >> 1) * 8];
+                let mut r = self.blocks[MDEC_BLK_CR].data[((x + xx) >> 1) + ((y + yy) >> 1) * 8];
+                let mut b = self.blocks[MDEC_BLK_CB].data[((x + xx) >> 1) + ((y + yy) >> 1) * 8];
                 let mut g = ((-0.3437 * (b as f32)) + (-0.7143 * (r as f32))) as i16;
 
                 r = (1.402 * (r as f32)) as i16;
                 b = (1.772 * (b as f32)) as i16;
 
-                let l = self.blocks[MDEC_BLK_Y][x + y * 8];
+                let l = self.blocks[MDEC_BLK_Y].data[x + y * 8];
 
                 r = util::clip(l + r, -128, 127);
                 g = util::clip(l + g, -128, 127);
@@ -264,15 +301,15 @@ impl Mdec {
                 2 => {
                     for i in 0..32 {
                         let half = self.data_in.pop_front().unwrap();
-                        self.quant_tables[MDEC_QT_Y][i * 2] = half as u8;
-                        self.quant_tables[MDEC_QT_Y][i * 2 + 1] = (half >> 8) as u8;
+                        self.quant_tables[MDEC_QT_Y].data[i * 2] = half as u8;
+                        self.quant_tables[MDEC_QT_Y].data[i * 2 + 1] = (half >> 8) as u8;
                     }
 
                     if self.send_colour {
                         for i in 0..32 {
                             let half = self.data_in.pop_front().unwrap();
-                            self.quant_tables[MDEC_QT_UV][i * 2] = half as u8;
-                            self.quant_tables[MDEC_QT_UV][i * 2 + 1] = (half >> 8) as u8;
+                            self.quant_tables[MDEC_QT_UV].data[i * 2] = half as u8;
+                            self.quant_tables[MDEC_QT_UV].data[i * 2 + 1] = (half >> 8) as u8;
                         }
                     }
                 }
