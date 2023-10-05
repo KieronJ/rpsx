@@ -661,7 +661,7 @@ impl Cdrom {
 
                 if let Some(file) = self.game_file.as_mut() {
                     file.seek(SeekFrom::Start(cursor)).unwrap();
-                    file.read_exact(&mut data);
+                    file.read_exact(&mut data).unwrap();
                 } else {
                     panic!("no game file");
                 }

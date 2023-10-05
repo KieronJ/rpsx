@@ -315,6 +315,7 @@ impl Frontend {
             let bytes = rmp_serde::to_vec(system).expect("unable to serialize state");
             let mut compressor = XzEncoder::new(file, 6);
             compressor.write_all(&bytes).unwrap();
+            compressor.finish().unwrap();
             println!("DONE!");
         } else {
             println!("Unable to create save state file");
