@@ -7,6 +7,9 @@ use sdl2::controller::{Axis, Button};
 use sdl2::event::{Event, WindowEvent};
 use sdl2::keyboard::Keycode;
 
+use xz2::read::XzDecoder;
+use xz2::write::XzEncoder;
+
 use crate::{Options, Scaling};
 use crate::psx::System;
 use crate::util;
@@ -282,10 +285,11 @@ impl Frontend {
             return;
         }
 
-        if let Ok(mut file) = File::open(path) {
+        if let Ok(file) = File::open(path) {
             let mut bytes = Vec::new();
-            file.read_to_end(&mut bytes).unwrap();
-            *system = serde_json::from_slice(&bytes).unwrap();
+            let mut decompressor = XzDecoder::new(file);
+            decompressor.read_to_end(&mut bytes).unwrap();
+            *system = rmp_serde::from_slice(&bytes).unwrap();
             system.reload_host_files();
             println!("DONE!");
         } else {
@@ -303,9 +307,10 @@ impl Frontend {
             fs::create_dir_all(parent).expect("unable to create path to save state file");
         }
 
-        if let Ok(mut file) = File::create(path) {
-            let bytes = serde_json::to_vec(system).expect("unable to serialize state");
-            file.write_all(&bytes).unwrap();
+        if let Ok(file) = File::create(path) {
+            let bytes = rmp_serde::to_vec(system).expect("unable to serialize state");
+            let mut compressor = XzEncoder::new(file, 6);
+            compressor.write_all(&bytes).unwrap();
             println!("DONE!");
         } else {
             println!("Unable to create save state file");
