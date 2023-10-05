@@ -1,4 +1,5 @@
 use byteorder::{ByteOrder, LittleEndian};
+use serde::{Deserialize, Serialize};
 
 use crate::util;
 
@@ -19,6 +20,7 @@ pub enum BusWidth {
     WORD,
 }
 
+#[derive(Deserialize, Serialize)]
 pub struct Bus {
     bios: Box<[u8]>,
     ram: Box<[u8]>,
@@ -143,7 +145,7 @@ impl Bus {
         let mut error = false;
 
         let value = match address {
-            0x0000_0000...0x007f_ffff => {
+            0x0000_0000..=0x007f_ffff => {
                 let offset = (address & 0x1f_ffff) as usize;
 
                 match width {
@@ -258,7 +260,7 @@ impl Bus {
         if (address & 0x3) != 0 {
             panic!("[RECOMPILER] [ERROR] Unaligned address: 0x{:08x}", address);
         }
-    
+
         match address {
             0x0000_0000..=0x007f_ffff => {
                 let offset = (address & 0x1f_fffc) as usize;
@@ -298,7 +300,7 @@ impl Bus {
             0x1f00_0000..=0x1f7f_ffff => (), //println!("[MMU] [INFO] Store to EXPENSION_1 region address: 0x{:08x}", address);
             0x1f80_0000..=0x1f80_03ff => {
                 let offset = (address - 0x1f80_0000) as usize;
-                
+
                 match width {
                     BusWidth::BYTE => *self.scratchpad.get_unchecked_mut(offset) = value as u8,
                     BusWidth::HALF => {
@@ -373,6 +375,6 @@ impl Bus {
     }
 
     pub fn recompiler_store_word(&mut self, address: u32, value: u32) {
-        
+
     }
 }

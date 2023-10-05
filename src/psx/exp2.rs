@@ -1,10 +1,13 @@
 use std::str;
 
+use serde::{Deserialize, Serialize};
+
 const DUART_SRA: u32 = 0x1f802021;
 const DUART_THRA: u32 = 0x1f802023;
 
 const DUART_SR_TXRDY: u8 = 0x4;
 
+#[derive(Deserialize, Serialize)]
 pub struct Exp2 {
     tx_buf: Vec<u8>,
 }

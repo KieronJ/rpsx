@@ -1,3 +1,5 @@
+use serde::{Deserialize, Serialize};
+
 #[derive(Debug, PartialEq)]
 pub enum Exception {
     Interrupt = 0,
@@ -11,6 +13,7 @@ pub enum Exception {
     Overflow = 12,
 }
 
+#[derive(Deserialize, Serialize)]
 struct Dcic {
     trap: bool,
     user_debug: bool,
@@ -105,6 +108,7 @@ impl Dcic {
     }
 }
 
+#[derive(Deserialize, Serialize)]
 struct Status {
     coprocessor_usability: [bool; 4],
     reverse_endianness: bool,
@@ -229,6 +233,7 @@ impl Status {
     }
 }
 
+#[derive(Deserialize, Serialize)]
 struct Cause {
     branch_delay: bool,
     branch_taken: bool,
@@ -285,6 +290,7 @@ impl Cause {
     }
 }
 
+#[derive(Deserialize, Serialize)]
 pub struct Cop0 {
     bpc: u32,
     bda: u32,

@@ -1,4 +1,6 @@
-#[derive(Clone, Copy)]
+use serde::{Deserialize ,Serialize};
+
+#[derive(Clone, Copy, Deserialize, Serialize)]
 pub struct Vector2i {
     pub x: i32,
     pub y: i32,

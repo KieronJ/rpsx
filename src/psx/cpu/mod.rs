@@ -3,6 +3,9 @@ mod dmac;
 mod gte;
 mod instruction;
 
+use serde::{Deserialize, Serialize};
+use serde_big_array::BigArray;
+
 use super::bus::{Bus, BusWidth};
 use super::timekeeper::Timekeeper;
 
@@ -11,7 +14,7 @@ use self::dmac::Dmac;
 use self::gte::Gte;
 use self::instruction::Instruction;
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Deserialize, Serialize)]
 struct ICacheLine {
     valid: usize,
     tag: u32,
@@ -28,7 +31,9 @@ impl ICacheLine {
     }
 }
 
+#[derive(Deserialize, Serialize)]
 struct ICache {
+    #[serde(with = "BigArray")]
     lines: [ICacheLine; 256],
 }
 
@@ -40,6 +45,7 @@ impl ICache {
     }
 }
 
+#[derive(Deserialize, Serialize)]
 pub struct R3000A {
     pub pc: u32,
     pub new_pc: u32,
@@ -1067,7 +1073,7 @@ impl R3000A {
         let v = self.reg(rt);
 
         self.execute_load_delay();
-        
+
         let cop0_break = self.cop0.test_write(addr);
 
         if addr & 0x01 != 0 {
@@ -1432,7 +1438,7 @@ impl R3000A {
             let tag = pc & 0x7ffff000;
 
             let line = ((pc & 0xff0) >> 4) as usize;
-            let index = ((pc & 0xc) >> 2) as usize; 
+            let index = ((pc & 0xc) >> 2) as usize;
 
             let cline = unsafe { self.icache.lines.get_unchecked_mut(line) };
 
@@ -1489,7 +1495,7 @@ impl R3000A {
 
         if self.cop0.isolate_cache() {
             let line = ((address & 0xff0) >> 4) as usize;
-            let index = ((address & 0xc) >> 2) as usize; 
+            let index = ((address & 0xc) >> 2) as usize;
 
             let cline = unsafe { self.icache.lines.get_unchecked(line) };
 
@@ -1542,7 +1548,7 @@ impl R3000A {
 
         if self.cop0.isolate_cache() {
             let line = ((address & 0xff0) >> 4) as usize;
-            let index = ((address & 0xc) >> 2) as usize; 
+            let index = ((address & 0xc) >> 2) as usize;
 
             let tag_test = self.icache_tag_test();
 

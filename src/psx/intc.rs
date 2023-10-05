@@ -1,3 +1,5 @@
+use serde::{Deserialize, Serialize};
+
 #[derive(Debug, PartialEq)]
 pub enum Interrupt {
     Vblank,
@@ -33,6 +35,7 @@ impl Interrupt {
     }
 }
 
+#[derive(Deserialize, Serialize)]
 struct InterruptRegister {
     pio: bool,
     spu: bool,
@@ -97,6 +100,7 @@ impl InterruptRegister {
     }
 }
 
+#[derive(Deserialize, Serialize)]
 pub struct Intc {
     status: InterruptRegister,
     mask: InterruptRegister,

@@ -1,3 +1,7 @@
+use serde::{Deserialize, Serialize};
+
+#[derive(Deserialize, Serialize)]
+
 pub struct Controller {
     state: usize,
     pub digital_mode: bool,

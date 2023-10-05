@@ -1,8 +1,10 @@
 use std::cmp;
 
+use serde::{Deserialize, Serialize};
+
 use crate::util::clip;
 
-#[derive(Clone, Copy, PartialEq)]
+#[derive(Clone, Copy, Deserialize, PartialEq, Serialize)]
 pub enum AdsrState {
     Disabled,
     Attack,
@@ -168,7 +170,7 @@ impl AdsrConfig {
     }
 }
 
-#[derive(Clone, Copy, Default)]
+#[derive(Clone, Copy, Default, Deserialize, Serialize)]
 pub struct Adsr {
     pub cycles: isize,
 

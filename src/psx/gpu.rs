@@ -2,9 +2,12 @@ use std::cmp;
 use std::fs::File;
 use std::io::Write;
 
+use serde::{Deserialize, Serialize};
+use serde_big_array::BigArray;
+
 use byteorder::{ByteOrder, LittleEndian};
 
-use crate::gpu_viewer::{GpuCommand, GpuFrame, GpuPolygon};
+use crate::gpu_viewer::{GpuFrame, GpuPolygon};
 use crate::util;
 
 use super::intc::{Intc, Interrupt};
@@ -25,6 +28,7 @@ pub const CMD_SIZE: [usize; 256] = [
     1, 1,
 ];
 
+#[derive(Deserialize, Serialize)]
 struct Transfer {
     x: u32,
     y: u32,
@@ -53,7 +57,7 @@ impl Transfer {
     }
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Deserialize, Serialize)]
 enum DmaDirection {
     Off,
     Fifo,
@@ -61,7 +65,7 @@ enum DmaDirection {
     GpureadToCpu,
 }
 
-#[derive(Clone, Copy, PartialEq)]
+#[derive(Clone, Copy, Deserialize, PartialEq, Serialize)]
 enum TexturePageColours {
     TP4Bit,
     TP8Bit,
@@ -69,7 +73,7 @@ enum TexturePageColours {
     Reserved,
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Deserialize, Serialize)]
 enum SemiTransparency {
     Half,
     Add,
@@ -77,7 +81,7 @@ enum SemiTransparency {
     AddQuarter,
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Deserialize, Serialize)]
 pub struct Texpage {
     flip_y: bool,
     flip_x: bool,
@@ -134,7 +138,7 @@ impl Texpage {
     }
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Deserialize, Serialize)]
 struct CacheEntry {
     tag: isize,
     data: [u8; 8],
@@ -149,9 +153,14 @@ impl CacheEntry {
     }
 }
 
+#[derive(Deserialize, Serialize)]
 pub struct Gpu {
     vram: Box<[u8]>,
+
+    #[serde(with = "BigArray")]
     texture_cache: [CacheEntry; 256],
+
+    #[serde(with = "BigArray")]
     clut_cache: [u16; 256],
     clut_cache_tag: isize,
 
@@ -572,7 +581,7 @@ impl Gpu {
         value |= (self.colour_depth as u32) << 21;
         value |= (self.video_mode as u32) << 20;
         value |= match self.vres {
-            480 => (1 << 19),
+            480 => 1 << 19,
             240 => 0,
             _ => unreachable!(),
         };
@@ -1258,7 +1267,7 @@ impl Gpu {
                 if textured {
                     let mut uv = Vector2i::new(texcoord.x + (x & 0xff), texcoord.y + (y & 0xff));
                     uv = self.mask_texcoord(uv);
-                    
+
                     let (mut texture, skip) = self.get_texture(uv, clut);
 
                     if skip {
@@ -1391,7 +1400,7 @@ impl Gpu {
                     if textured {
                         let mut uv = Gpu::interpolate_texcoord(area, w, t[0], t[1], t[2]);
                         uv = self.mask_texcoord(uv);
-                        
+
                         let (mut texture, skip) = self.get_texture(uv, clut);
 
                         if skip {

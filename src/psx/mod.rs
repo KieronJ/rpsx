@@ -16,6 +16,8 @@ mod timers;
 use std::fs::File;
 use std::io;
 
+use serde::{Deserialize, Serialize};
+
 use crate::gpu_viewer::GpuFrame;
 use crate::util;
 
@@ -24,6 +26,7 @@ use self::peripherals::controller::Controller;
 use self::cpu::R3000A;
 use self::timekeeper::Timekeeper;
 
+#[derive(Deserialize, Serialize)]
 pub struct System {
     pub running: bool,
 
@@ -31,17 +34,23 @@ pub struct System {
     cpu: R3000A,
 
     timekeeper: Timekeeper,
+
+    bios_filepath: String,
+    game_filepath: String,
 }
 
 impl System {
-    pub fn new(bios_filepath: &str, game_filepath: &str) -> System {
+    pub fn new(bios_filepath: String, game_filepath: String) -> System {
         System {
             running: true,
 
-            bus: Bus::new(bios_filepath, game_filepath),
+            bus: Bus::new(bios_filepath.as_str(), game_filepath.as_str()),
             cpu: R3000A::new(),
 
             timekeeper: Timekeeper::new(),
+
+            bios_filepath: bios_filepath,
+            game_filepath: game_filepath,
         }
     }
 
@@ -50,6 +59,11 @@ impl System {
         self.cpu.reset();
 
         self.timekeeper.reset();
+    }
+
+    pub fn reload_host_files(&mut self) {
+        self.bus.cdrom().load_disc(&self.game_filepath);
+        self.bus.peripherals().load_memcards();
     }
 
     pub fn run_frame(&mut self) {

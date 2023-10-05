@@ -3,6 +3,7 @@
 bios/
 cards/
 games/
+states/
 target/
 *.ini
 *.lock

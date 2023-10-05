@@ -1,3 +1,5 @@
+use std::fs::{self, File};
+use std::path::Path;
 use std::time::Instant;
 
 use sdl2::controller::{Axis, Button};
@@ -26,7 +28,7 @@ pub struct Frontend {
 
     event_pump: sdl2::EventPump,
 
-    controller: Option<sdl2::controller::GameController>,
+    _controller: Option<sdl2::controller::GameController>,
 
     vao: gl::types::GLuint,
     vbo: gl::types::GLuint,
@@ -43,11 +45,11 @@ pub struct Frontend {
 }
 
 impl Frontend {
-    pub fn create(ctx_temp: &mut sdl2::Sdl, width: u32, height: u32, title: &str) -> Self {
+    pub fn create(ctx_temp: &mut sdl2::Sdl, width: u32, height: u32) -> Self {
         let video = ctx_temp.video().unwrap();
         let ctr = ctx_temp.game_controller().unwrap();
 
-        let window = video.window(title, width, height)
+        let window = video.window("rpsx", width, height)
             .resizable()
             .opengl()
             .build()
@@ -112,7 +114,7 @@ impl Frontend {
 
             event_pump: ctx_temp.event_pump().unwrap(),
 
-            controller: controller,
+            _controller: controller,
 
             vao: vao,
             vbo: vbo,
@@ -157,6 +159,9 @@ impl Frontend {
                 _ => {},
             };
         }
+
+        let title = format!("rpsx - slot {}", options.state_index);
+        self.window.set_title(&title).expect("unable to set window title");
     }
 
     fn handle_controller_button(button: Button, down: bool, system: &mut System) {
@@ -198,11 +203,10 @@ impl Frontend {
             Axis::RightY => controller.axis_ry = normalised,
             Axis::TriggerLeft => controller.button_l2 = normalised >= 192,
             Axis::TriggerRight => controller.button_r2 = normalised >= 192,
-            _ => (),
         }
     }
 
-    fn handle_keydown(keycode: Keycode, options: &mut Options, system: &mut System) {
+    fn handle_keydown(keycode: Keycode, _options: &mut Options, system: &mut System) {
         let controller = system.get_controller();
 
         match keycode {
@@ -238,6 +242,13 @@ impl Frontend {
                     Scaling::Fullscreen => Scaling::None
                 };
             }
+            Keycode::F6 => Frontend::load_state(system, options.state_index),
+            Keycode::F7 => Frontend::save_state(system, options.state_index),
+            Keycode::Comma => {
+                options.state_index += 1;
+                options.state_index %= 10;
+                println!("choosing save slot {}...", options.state_index);
+            },
             Keycode::F8 => options.draw_full_vram ^= true,
             Keycode::P => options.pause ^= true,
 
@@ -257,6 +268,44 @@ impl Frontend {
             Keycode::Num4 => controller.button_r2 = false,
             _ => {},
         };
+    }
+
+    fn load_state(system: &mut System, index: usize) {
+        println!("Loading state {}...", index);
+
+        let name = format!("./states/state{index}.bin");
+        let path = Path::new(&name);
+
+        if !path.exists() {
+            println!("No file for save state {}", index);
+            return;
+        }
+
+        if let Ok(file) = File::open(path) {
+            *system = serde_json::from_reader(file).expect("unable to deserialize state");
+            system.reload_host_files();
+            println!("DONE!");
+        } else {
+            println!("unable to create save state file");
+        }
+    }
+
+    fn save_state(system: &mut System, index: usize) {
+        println!("Saving state {}...", index);
+
+        let name = format!("./states/state{index}.bin");
+        let path = Path::new(&name);
+
+        if let Some(parent) = path.parent() {
+            fs::create_dir_all(parent).expect("unable to create path to save state file");
+        }
+
+        if let Ok(file) = File::create(path) {
+            serde_json::to_writer(file, system).expect("unable to serialize state");
+            println!("DONE!");
+        } else {
+            println!("Unable to create save state file");
+        }
     }
 
     pub fn render(&mut self, options: &Options, system: &System) {
