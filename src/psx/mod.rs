@@ -115,6 +115,14 @@ impl System {
         self.bus.peripherals().controller()
     }
 
+    pub fn get_disc_id(&mut self) -> String {
+        self.bus.cdrom().get_disc_id()
+    }
+
+    pub fn get_disc_id_raw(&mut self) -> String {
+        self.bus.cdrom().get_disc_id_raw()
+    }
+
     pub fn get_24bit(&self) -> bool {
         self.bus.gpu().get_24bit()
     }

@@ -164,7 +164,8 @@ impl Frontend {
             };
         }
 
-        let title = format!("rpsx - slot {}", options.state_index);
+        let id = system.get_disc_id();
+        let title = format!("rpsx - {} - slot {}", id, options.state_index);
         self.window.set_title(&title).expect("unable to set window title");
     }
 
@@ -277,7 +278,8 @@ impl Frontend {
     fn load_state(system: &mut System, index: usize) {
         println!("Loading state {}...", index);
 
-        let name = format!("./states/state{index}.bin");
+        let id = system.get_disc_id_raw();
+        let name = format!("./states/{id}_slot{index}.state");
         let path = Path::new(&name);
 
         if !path.exists() {
@@ -300,7 +302,8 @@ impl Frontend {
     fn save_state(system: &mut System, index: usize) {
         println!("Saving state {}...", index);
 
-        let name = format!("./states/state{index}.bin");
+        let id = system.get_disc_id_raw();
+        let name = format!("./states/{id}_slot{index}.state");
         let path = Path::new(&name);
 
         if let Some(parent) = path.parent() {

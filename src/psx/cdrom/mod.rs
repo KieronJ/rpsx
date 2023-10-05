@@ -21,6 +21,7 @@ use super::spu::Spu;
 pub const SECTORS_PER_SECOND: u64 = 75;
 pub const SECTORS_PER_MINUTE: u64 = 60 * SECTORS_PER_SECOND;
 pub const BYTES_PER_SECTOR: u64 = 2352;
+pub const SECTOR_HEADER_SIZE: u64 = 24;
 pub const LEAD_IN_SECTORS: u64 = 2 * SECTORS_PER_SECOND;
 
 pub const ADDRESS_OFFSET: usize = 12;
@@ -411,6 +412,35 @@ impl Cdrom {
         }
 
         self.game_file = Some(File::open(path).unwrap());
+    }
+
+    // TODO: It's stupid to read this every time,
+    // make it an Option<String> and invalidate if the disc is changed.
+    pub fn get_disc_id(&mut self) -> String {
+        if self.game_file.is_none() {
+            return String::from("NODISC");
+        }
+
+        let mut pvd = [0u8; 2048];
+        let file = self.game_file.as_mut().unwrap();
+
+        // Load the primary volume descriptor from the disc
+        file.seek(SeekFrom::Start(16 * BYTES_PER_SECTOR + SECTOR_HEADER_SIZE)).unwrap();
+        file.read_exact(&mut pvd).unwrap();
+
+        assert_eq!(pvd[0], 0x1);   // This must be of type PVD
+        assert_ne!(pvd[40], 0x20); // The volume identifier must not be empty
+
+        // Read the volume identifier and strip spaces/other junk.
+        let mut id: String = String::from_utf8_lossy(&pvd[40..72]).to_string();
+        id.retain(|c| !c.is_whitespace());
+        id
+    }
+
+    pub fn get_disc_id_raw(&mut self) -> String {
+        let mut id = self.get_disc_id();
+        id.retain(|c| c.is_alphanumeric());
+        id.to_ascii_lowercase()
     }
 
     pub fn tick(&mut self, intc: &mut Intc, spu: &mut Spu, clocks: usize) {
