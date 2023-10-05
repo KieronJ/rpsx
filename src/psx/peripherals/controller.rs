@@ -4,6 +4,7 @@ use serde::{Deserialize, Serialize};
 
 pub struct Controller {
     state: usize,
+
     pub digital_mode: bool,
 
     pub button_select: bool,
@@ -61,6 +62,30 @@ impl Controller {
 
     pub fn reset_device_state(&mut self) {
         self.state = 0;
+    }
+
+    pub fn reset_switch_state(&mut self) {
+        self.digital_mode = false;
+        self.button_select = false;
+        self.button_l3 = false;
+        self.button_r3 = false;
+        self.button_start = false;
+        self.button_dpad_up = false;
+        self.button_dpad_right = false;
+        self.button_dpad_down = false;
+        self.button_dpad_left = false;
+        self.button_l2 = false;
+        self.button_r2 = false;
+        self.button_l1 = false;
+        self.button_r1 = false;
+        self.button_triangle = false;
+        self.button_circle = false;
+        self.button_cross = false;
+        self.button_square = false;
+        self.axis_lx = 128;
+        self.axis_ly = 128;
+        self.axis_rx = 128;
+        self.axis_ry = 128;
     }
 
     pub fn response(&mut self, command: u8) -> u8 {

@@ -293,6 +293,7 @@ impl Frontend {
             decompressor.read_to_end(&mut bytes).unwrap();
             *system = rmp_serde::from_slice(&bytes).unwrap();
             system.reload_host_files();
+            system.get_controller().reset_switch_state();
             println!("DONE!");
         } else {
             println!("unable to create save state file");
