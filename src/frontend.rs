@@ -1,4 +1,5 @@
 use std::fs::{self, File};
+use std::io::{Read, Write};
 use std::path::Path;
 use std::time::Instant;
 
@@ -281,8 +282,10 @@ impl Frontend {
             return;
         }
 
-        if let Ok(file) = File::open(path) {
-            *system = serde_json::from_reader(file).expect("unable to deserialize state");
+        if let Ok(mut file) = File::open(path) {
+            let mut bytes = Vec::new();
+            file.read_to_end(&mut bytes).unwrap();
+            *system = serde_json::from_slice(&bytes).unwrap();
             system.reload_host_files();
             println!("DONE!");
         } else {
@@ -300,8 +303,9 @@ impl Frontend {
             fs::create_dir_all(parent).expect("unable to create path to save state file");
         }
 
-        if let Ok(file) = File::create(path) {
-            serde_json::to_writer(file, system).expect("unable to serialize state");
+        if let Ok(mut file) = File::create(path) {
+            let bytes = serde_json::to_vec(system).expect("unable to serialize state");
+            file.write_all(&bytes).unwrap();
             println!("DONE!");
         } else {
             println!("Unable to create save state file");
