@@ -476,7 +476,7 @@ impl Gpu {
         let mut y = yend - ystart;
 
         if self.vertical_interlace {
-            y <<= 1;
+            y *= 2;
         }
 
         (x, y)
@@ -485,15 +485,20 @@ impl Gpu {
     pub fn get_framebuffer(&self,
                            framebuffer: &mut [u8],
                            draw_full_vram: bool) {
-
         let (xs, ys) = if draw_full_vram {
             (0, 0)
         } else {
-            self.get_display_origin()
+            let (mut x, mut y) = self.get_display_origin();
+
+            // Adjust start based on CRTC registers
+            x += (self.horizontal_display_start - 608) / self.get_dotclock();
+            y += (self.vertical_display_start - 16) * 2;
+
+            (x, y)
         };
 
         let (w, h) = if draw_full_vram {
-            (1024, 512)
+            (0, 0)
         } else {
             self.get_display_size()
         };

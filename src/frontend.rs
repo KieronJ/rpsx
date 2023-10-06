@@ -255,6 +255,7 @@ impl Frontend {
                 println!("choosing save slot {}...", options.state_index);
             },
             Keycode::F8 => options.draw_full_vram ^= true,
+            Keycode::F9 => options.crop_overscan ^= true,
             Keycode::P => options.pause ^= true,
 
             Keycode::W => controller.button_dpad_up = false,
@@ -337,9 +338,17 @@ impl Frontend {
 
         if !options.draw_full_vram {
             let (scale_x, scale_y) = match options.scaling {
-                Scaling::None => self.calculate_scale_none(system),
-                Scaling::Aspect => self.calculate_scale_aspect(system),
-                Scaling::Fullscreen => (1.0, 1.0),
+                Scaling::None => self.calculate_scale_none(),
+                Scaling::Aspect => self.calculate_scale_aspect(options.crop_overscan),
+                Scaling::Fullscreen => {
+                    let mut scale = (1.0, 1.0);
+
+                    if options.crop_overscan {
+                        scale.1 *= 240.0/216.0;
+                    }
+
+                    scale
+                },
             };
 
             vertices[0][0] *= scale_x;
@@ -397,42 +406,30 @@ impl Frontend {
         self.window.gl_swap_window();
     }
 
-    fn get_screen_ratio(&self, system: &System) -> (f32, f32) {
+    fn get_screen_ratio(&self) -> (f32, f32) {
         let (window_w, window_h) = self.window.size();
-        let (display_w, display_h) = system.get_display_size();
 
-        let rx = display_w as f32 / window_w as f32;
-        let ry = display_h as f32 / window_h as f32;
+        let rx = 640.0 / window_w as f32;
+        let ry = 480.0 / window_h as f32;
 
         (rx, ry)
     }
 
-    fn calculate_scale_none(&self, system: &System) -> (f32, f32) {
-        let (x, y) = self.get_screen_ratio(system);
+    fn calculate_scale_none(&self) -> (f32, f32) {
+        let (x, y) = self.get_screen_ratio();
         (util::clip(x, 0.0, 1.0), util::clip(y, 0.0, 1.0))
     }
 
-    fn calculate_scale_aspect(&self, system: &System) -> (f32, f32) {
-        let (x, y) = self.get_screen_ratio(system);
+    fn calculate_scale_aspect(&self, crop_overscan: bool) -> (f32, f32) {
+        let (x, y) = self.get_screen_ratio();
 
-        let (window_w, window_h) = self.window.size();
-        let (display_w, display_h) = system.get_display_size();
+        let scale = if crop_overscan {
+            240.0/216.0
+        } else {
+            1.0
+        };
 
-        let aspect = (display_h as f32) / (display_w as f32);
-
-        if x > y {
-            let target = (window_w as f32) * aspect;
-            let ratio = target / (window_h as f32);
-
-            return (1.0, ratio);
-        } else if y > x {
-            let target = (window_h as f32) / aspect;
-            let ratio = target / (window_w as f32);
-
-            return (ratio, 1.0);
-        }
-
-        (1.0, 1.0)
+        (x / x.max(y / scale), y * scale / x.max(y))
     }
 }
 
