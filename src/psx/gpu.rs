@@ -7,7 +7,6 @@ use serde_big_array::BigArray;
 
 use byteorder::{ByteOrder, LittleEndian};
 
-use crate::gpu_viewer::{GpuFrame, GpuPolygon};
 use crate::util;
 
 use super::intc::{Intc, Interrupt};
@@ -248,7 +247,6 @@ pub struct Gpu {
     vertical_display_start: u32,
     vertical_display_end: u32,
 
-    frame: GpuFrame,
     frame_complete: bool,
 }
 
@@ -344,7 +342,6 @@ impl Gpu {
             vertical_display_start: 16,
             vertical_display_end: 256,
 
-            frame: GpuFrame::new(),
             frame_complete: false,
         }
     }
@@ -530,10 +527,6 @@ impl Gpu {
                 framebuffer_address += 3;
             }
         }
-    }
-
-    pub fn get_frame_data(&mut self) -> &mut GpuFrame {
-        &mut self.frame
     }
 
     pub fn dump_vram(&self) {
@@ -1154,23 +1147,6 @@ impl Gpu {
 
             self.texpage = texpage;
         }
-
-        let mut polygon = GpuPolygon::new();
-        polygon.shaded = shaded;
-        polygon.quad = points == 4;
-        polygon.textured = textured;
-        polygon.semi_transparent = transparency;
-        polygon.raw_texture = !blend;
-
-        for i in 0..4 {
-            polygon.vertices[i].position = (vertices[i].x as i16, vertices[i].y as i16);
-            polygon.vertices[i].texcoord = (texcoords[i].x as u8, texcoords[i].y as u8);
-            polygon.vertices[i].colour = (colours[i].r, colours[i].g, colours[i].b);
-        }
-
-        polygon.texpage = texpage_raw;
-
-        //self.frame.add(GpuCommand::Polygon(polygon));
 
         colours[0] = Colour::from_u32(self.command_buffer[0]);
         self.rasterise_triangle(&vertices[0..3],

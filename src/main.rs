@@ -5,7 +5,6 @@ extern crate imgui;
 
 mod audio_interface;
 mod frontend;
-mod gpu_viewer;
 //mod gui;
 
 mod psx;
@@ -16,7 +15,6 @@ use clap::App;
 
 use audio_interface::AudioInterface;
 use frontend::Frontend;
-//use gpu_viewer::GpuFrame;
 //use gui::Gui;
 
 use psx::System;
@@ -41,21 +39,8 @@ impl Scaling {
     }
 }
 
-pub struct GpuViewerOptions {
-    overlay_position: bool,
-    overlay_texture: bool,
-    overlay_clut: bool,
-}
-
 pub struct Options {
     draw_full_vram: bool,
-    draw_display_area: bool,
-
-    show_gpu_viewer: bool,
-    show_metrics: bool,
-
-    gpu_viewer: GpuViewerOptions,
-
     scaling: Scaling,
     crop_overscan: bool,
 
@@ -76,17 +61,6 @@ fn main() {
 
     let mut options = Options {
         draw_full_vram: false,
-        draw_display_area: false,
-
-        show_gpu_viewer: false,
-        show_metrics: false,
-
-        gpu_viewer: GpuViewerOptions {
-            overlay_position: true,
-            overlay_texture: true,
-            overlay_clut: true,
-        },
-
         scaling: Scaling::Aspect,
         crop_overscan: true,
 
@@ -104,7 +78,6 @@ fn main() {
 
     // Disabled due to Dear ImGui version bump
     //let mut gui = Gui::new(&video.display);
-    //let mut gpu_frame = GpuFrame::new();
 
     let mut system = System::new(bios_filepath.to_string(), game_filepath.to_string());
     system.reset();
@@ -114,7 +87,6 @@ fn main() {
     while system.running {
         if options.step {
             system.run_frame();
-            //gpu_frame.take(system.get_frame_data());
 
             options.step = false;
             options.pause = true;
@@ -122,7 +94,6 @@ fn main() {
 
         if !options.pause {
             system.run_frame();
-            //gpu_frame.take(system.get_frame_data());
         }
 
         audio.push_samples(system.get_audio_samples());
