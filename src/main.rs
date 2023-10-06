@@ -57,6 +57,7 @@ pub struct Options {
     gpu_viewer: GpuViewerOptions,
 
     scaling: Scaling,
+    crop_overscan: bool,
 
     pause: bool,
     step: bool,
@@ -87,6 +88,7 @@ fn main() {
         },
 
         scaling: Scaling::Aspect,
+        crop_overscan: true,
 
         pause: false,
         step: false,
