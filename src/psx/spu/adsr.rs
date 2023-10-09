@@ -198,7 +198,7 @@ impl Adsr {
                     cycles *= 4;
                 }
             } else {
-                step = step * self.volume as isize / 0x8000;
+                step = (step * self.volume as isize) >> 15;
             }
         }
 
