@@ -1324,14 +1324,14 @@ impl Gpu {
         let mut maxy = util::max3(v[0].y, v[1].y, v[2].y);
 
         if (maxx >= 1024 && minx >= 1024) || (maxx < 0 && minx < 0) {
-                return;
+            return;
         }
 
         if (maxy >= 512 && miny >= 512) || (maxy < 0 && miny < 0) {
-                return;
+            return;
         }
 
-        if maxx - minx >= 1024 {
+        if (maxx - minx) >= 1024 {
             return;
         }
 
