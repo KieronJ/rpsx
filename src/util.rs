@@ -3,7 +3,7 @@ use std::fs::File;
 use std::io::{self, Read};
 use std::path::Path;
 
-use byteorder::{ByteOrder, LittleEndian}; 
+use byteorder::{ByteOrder, LittleEndian};
 
 pub fn bcd_to_u8(value: u8) -> u8 {
     ((value >> 4) * 10) + (value & 0xf)
@@ -29,23 +29,27 @@ pub fn f32_to_i16(value: f32) -> i16 {
     }
 }
 
-pub fn sign_extend_u16(value: u16, size: usize) -> u16 {
+pub fn sign_extend_u16(mut value: u16, size: usize) -> u16 {
     let sign = 1 << (size - 1);
-    let mask = !((1 << size) - 1);
+    let mask = (1 << size) - 1;
 
     if (value & sign) != 0 {
-        return value | mask;
+        value |= !mask;
+    } else {
+        value &= mask;
     }
 
     return value;
 }
 
-pub fn sign_extend_i32(value: i32, size: usize) -> i32 {
+pub fn sign_extend_i32(mut value: i32, size: usize) -> i32 {
     let sign = 1 << (size - 1);
-    let mask = !((1 << size) - 1);
+    let mask = (1 << size) - 1;
 
     if (value & sign) != 0 {
-        return value | mask;
+        value |= !mask;
+    } else {
+        value &= mask;
     }
 
     return value;
