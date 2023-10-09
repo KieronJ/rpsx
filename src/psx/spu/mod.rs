@@ -270,7 +270,6 @@ impl Spu {
         for i in 0..24 {
             if (self.key_on & (1 << i)) != 0 {
                 self.voice[i].key_on();
-                self.endx &= !(1 << i);
             }
         }
 
@@ -296,6 +295,8 @@ impl Spu {
     }
 
     fn update_endx(&mut self) {
+        self.endx = 0;
+
         for i in 0..24 {
             if self.voice[i].endx() {
                 self.endx |= 1 << i;

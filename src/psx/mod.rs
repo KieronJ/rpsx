@@ -18,7 +18,6 @@ use std::io;
 
 use serde::{Deserialize, Serialize};
 
-use crate::gpu_viewer::GpuFrame;
 use crate::util;
 
 use self::bus::Bus;
@@ -139,10 +138,6 @@ impl System {
                            data: &mut [u8],
                            draw_full_vram: bool) {
         self.bus.gpu().get_framebuffer(data, draw_full_vram)
-    }
-
-    pub fn get_frame_data(&mut self) -> &mut GpuFrame {
-        self.bus.gpu_mut().get_frame_data()
     }
 
     pub fn dump_vram(&self) {

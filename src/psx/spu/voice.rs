@@ -88,6 +88,8 @@ impl Voice {
         self.adsr.volume = 0;
         self.adsr.cycles = 0;
 
+        self.endx = false;
+
         self.current_address = self.start_address;
 
         if !self.repeat_address_written {
@@ -103,9 +105,7 @@ impl Voice {
     }
 
     pub fn endx(&mut self) -> bool {
-        let endx = self.endx;
-        self.endx = false;
-        endx
+        self.endx
     }
 
     pub fn set_noise(&mut self, state: bool) {

@@ -187,18 +187,16 @@ impl Adsr {
 
         let c = AdsrConfig::from(self.state, self.config);
 
-        let direction = c.direction;
-
         let mut cycles = 1 << cmp::max(0, c.shift - 11);
         let mut step = c.step << cmp::max(0, 11 - c.shift);
 
         if c.mode == AdsrMode::Exponential {
-            if direction == AdsrDirection::Increase {
+            if c.direction == AdsrDirection::Increase {
                 if self.volume > 0x6000 {
                     cycles *= 4;
                 }
             } else {
-                step = step * self.volume as isize / 0x8000;
+                step = (step * self.volume as isize) >> 15;
             }
         }
 
@@ -210,8 +208,8 @@ impl Adsr {
                 return;
             }
 
-            if (direction == AdsrDirection::Increase && self.volume as isize >= c.target)
-                || (direction == AdsrDirection::Decrease && self.volume as isize <= c.target)
+            if (c.direction == AdsrDirection::Increase && self.volume as isize >= c.target)
+                || (c.direction == AdsrDirection::Decrease && self.volume as isize <= c.target)
             {
                 self.state = c.next;
                 self.cycles = 0;
