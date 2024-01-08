@@ -13,7 +13,7 @@ pub enum Device {
     Cdrom,
     Spu,
     Timers,
-    Peripherals,
+    Sio0,
 }
 
 impl Device {
@@ -23,7 +23,7 @@ impl Device {
             1 => Device::Cdrom,
             2 => Device::Spu,
             3 => Device::Timers,
-            4 => Device::Peripherals,
+            4 => Device::Sio0,
             _ => unreachable!(),
         }
     }

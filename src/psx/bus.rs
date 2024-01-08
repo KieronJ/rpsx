@@ -7,7 +7,7 @@ use super::cdrom::Cdrom;
 use super::exp2::Exp2;
 use super::gpu::Gpu;
 use super::intc::Intc;
-use super::peripherals::Peripherals;
+use super::sio0::Sio0;
 use super::mdec::Mdec;
 use super::spu::Spu;
 use super::timekeeper::{Device, Timekeeper};
@@ -29,7 +29,7 @@ pub struct Bus {
     cdrom: Cdrom,
     gpu: Gpu,
     mdec: Mdec,
-    peripherals: Peripherals,
+    sio0: Sio0,
     spu: Spu,
 
     exp2: Exp2,
@@ -71,7 +71,7 @@ impl Bus {
             cdrom: Cdrom::new(game_filepath),
             gpu: Gpu::new(),
             mdec: Mdec::new(),
-            peripherals: Peripherals::new(),
+            sio0: Sio0::new(),
             spu: Spu::new(),
 
             exp2: Exp2::new(),
@@ -92,7 +92,7 @@ impl Bus {
 
     pub fn reset(&mut self) {
         self.cdrom.reset();
-        self.peripherals.reset();
+        self.sio0.reset();
     }
 
     pub fn ram(&mut self) -> &mut Box<[u8]> {
@@ -115,8 +115,8 @@ impl Bus {
         &mut self.mdec
     }
 
-    pub fn peripherals(&mut self) -> &mut Peripherals {
-        &mut self.peripherals
+    pub fn sio0(&mut self) -> &mut Sio0 {
+        &mut self.sio0
     }
 
     pub fn spu(&mut self) -> &mut Spu {
@@ -137,7 +137,7 @@ impl Bus {
                 self.spu.tick(intc);
             },
             Device::Timers => self.timers.tick(intc, cycles),
-            Device::Peripherals => self.peripherals.tick(intc, cycles),
+            Device::Sio0 => self.sio0.tick(intc, cycles),
         };
     }
 
@@ -179,25 +179,25 @@ impl Bus {
             0x1f80_1014 => 0x2009_31e1,
             0x1f80_1060 => 0x0000_0b88,
             0x1f80_1040 => {
-                tk.sync_device(self, Device::Peripherals);
-                self.peripherals.rx_data()
+                tk.sync_device(self, Device::Sio0);
+                self.sio0.rx_data()
             },
             0x1f80_1044 => {
-                tk.sync_device(self, Device::Peripherals);
-                self.peripherals.status()
+                tk.sync_device(self, Device::Sio0);
+                self.sio0.status()
             }
             //0x1f80_1048 => {
             //    tk.sync_device(self, Device::Gpu);
-            //    tk.sync_device(self, Device::Peripherals);
-            //    self.peripherals.read_mode()
+            //    tk.sync_device(self, Device::Sio0);
+            //    self.sio0.read_mode()
             //}
             0x1f80_104a => {
-                tk.sync_device(self, Device::Peripherals);
-                self.peripherals.read_control()
+                tk.sync_device(self, Device::Sio0);
+                self.sio0.read_control()
             }
             0x1f80_104e => {
-                tk.sync_device(self, Device::Peripherals);
-                self.peripherals.read_baud()
+                tk.sync_device(self, Device::Sio0);
+                self.sio0.read_baud()
             }
             0x1f80_1070 => self.intc.read_status(),
             0x1f80_1074 => self.intc.read_mask(),
@@ -316,23 +316,23 @@ impl Bus {
             0x1f80_1000..=0x1f80_1023 => (), //println!("[BUS] [INFO] Store to MEM_CTRL region address: 0x{:08x}", address),
             0x1f80_1040 => {
                 tk.sync_device(self, Device::Gpu);
-                tk.sync_device(self, Device::Peripherals);
-                self.peripherals.tx_data(value)
+                tk.sync_device(self, Device::Sio0);
+                self.sio0.tx_data(value)
             }
             0x1f80_1048 => {
                 tk.sync_device(self, Device::Gpu);
-                tk.sync_device(self, Device::Peripherals);
-                self.peripherals.write_mode(value as u16)
+                tk.sync_device(self, Device::Sio0);
+                self.sio0.write_mode(value as u16)
             }
             0x1f80_104a => {
                 tk.sync_device(self, Device::Gpu);
-                tk.sync_device(self, Device::Peripherals);
-                self.peripherals.write_control(value as u16)
+                tk.sync_device(self, Device::Sio0);
+                self.sio0.write_control(value as u16)
             }
             0x1f80_104e => {
                 tk.sync_device(self, Device::Gpu);
-                tk.sync_device(self, Device::Peripherals);
-                self.peripherals.write_baud(value as u16)
+                tk.sync_device(self, Device::Sio0);
+                self.sio0.write_baud(value as u16)
             }
             0x1f80_1060 => (), //println!("[BUS] [INFO] Store to MEM_CTRL region address: 0x{:08x}", address),
             0x1f80_1070 => self.intc.acknowledge_irq(value),
