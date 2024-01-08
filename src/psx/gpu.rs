@@ -13,6 +13,9 @@ use super::intc::{Intc, Interrupt};
 use super::rasteriser::{Colour, Vector2i, Vector3i};
 use super::timers::Timers;
 
+// TODO: selectable dithering
+
+#[allow(dead_code)]
 pub const DITHER_TABLE: [i32; 16] = [-4, 0, -3, 1, 2, -2, 3, -1, -3, 1, -4, 0, 3, -1, 2, -2];
 
 pub const CMD_SIZE: [usize; 256] = [
@@ -445,10 +448,6 @@ impl Gpu {
         }
     }
 
-    pub fn get_24bit(&self) -> bool {
-        self.colour_depth
-    }
-
     pub fn get_display_origin(&self) -> (u32, u32) {
         (self.display_area_x, self.display_area_y)
     }
@@ -632,14 +631,14 @@ impl Gpu {
             self.polyline_remaining -= 1;
 
             if self.polyline_remaining == 0 {
-                let mut coords = [self.polyline_coord; 2];
+                let coords = [self.polyline_coord; 2];
                 let mut colours = [self.polyline_colour; 2];
 
                 if self.shaded {
                     colours[1] = Colour::from_u32(self.command_buffer[0]);
                 }
 
-                let coord2 = self.command_buffer[1];
+                let _coord2 = self.command_buffer[1];
                 //coords[1] = self.get_coord(coord2);
 
                 //self.rasterise_line(coords, colours);
@@ -1094,7 +1093,6 @@ impl Gpu {
         let mut texcoords = [Vector2i::new(0, 0); 4];
         let mut clut = Vector2i::new(0, 0);
         let mut texpage = self.texpage;
-        let mut texpage_raw = 0;
 
         let shaded = (command & 0x10) != 0;
         let points = match (command & 0x8) != 0 {
@@ -1123,7 +1121,6 @@ impl Gpu {
                     clut = Gpu::to_clut(self.command_buffer[pos]);
                 } else if i == 1 {
                     texpage = Texpage::from_u32(self.command_buffer[pos]);
-                    texpage_raw = (self.command_buffer[pos] >> 16) as u16;
                 }
 
                 pos += 1;
@@ -1171,7 +1168,7 @@ impl Gpu {
 
         let shaded = (command & 0x10) != 0;
         let polyline = (command & 0x8) != 0;
-        let transparency = (command & 0x2) != 0;
+        let _transparency = (command & 0x2) != 0;
 
         self.polyline = polyline;
         self.polyline_remaining = match shaded {

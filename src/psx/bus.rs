@@ -82,14 +82,6 @@ impl Bus {
         }
     }
 
-    pub fn get_address(&self) -> u64 {
-        self as *const _ as u64
-    }
-
-    pub fn get_recompiler_store_word() -> u64 {
-        Self::recompiler_store_word as *const () as u64
-    }
-
     pub fn reset(&mut self) {
         self.cdrom.reset();
         self.sio0.reset();
@@ -256,28 +248,6 @@ impl Bus {
         (value, error)
     }
 
-    pub fn load_instruction(&mut self, address: u32) -> u32 {
-        if (address & 0x3) != 0 {
-            panic!("[RECOMPILER] [ERROR] Unaligned address: 0x{:08x}", address);
-        }
-
-        match address {
-            0x0000_0000..=0x007f_ffff => {
-                let offset = (address & 0x1f_fffc) as usize;
-                LittleEndian::read_u32(&self.ram[offset..])
-            },
-            0x1f80_0000..=0x1f80_03ff => {
-                let offset = ((address - 0x1f80_0000) & !0x3) as usize;
-                LittleEndian::read_u32(&self.scratchpad[offset..])
-            },
-            0x1fc0_0000..=0x1fc7_ffff => {
-                let offset = (address as usize - 0x1fc0_0000) & !0x3;
-                LittleEndian::read_u32(&self.bios[offset..])
-            },
-            _ => panic!("[RECOMPILER] [ERROR] Unrecognised address: 0x{:08x}", address),
-        }
-    }
-
     pub unsafe fn store(&mut self, tk: &mut Timekeeper, width: BusWidth, address: u32, value: u32) -> bool {
         let mut error = false;
 
@@ -372,9 +342,5 @@ impl Bus {
         };
 
         error
-    }
-
-    pub fn recompiler_store_word(&mut self, address: u32, value: u32) {
-
     }
 }

@@ -7,6 +7,7 @@ pub struct Timecode {
     sector: usize,
 }
 
+#[allow(dead_code)]
 impl Timecode {
     pub fn from_bcd(minute: u8, second: u8, sector: u8) -> Self {
         Self {

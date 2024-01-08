@@ -45,24 +45,6 @@ impl Colour {
         pixel
     }
 
-    pub fn to_u32(self) -> u32 {
-        let mut pixel = 0;
-
-        pixel |= self.r as u32;
-        pixel |= (self.g as u32) << 8;
-        pixel |= (self.b as u32) << 16;
-
-        pixel
-    }
-
-    pub fn to_f32(self) -> [f32; 3] {
-        let r = (self.r as f32) / 255.0;
-        let g = (self.g as f32) / 255.0;
-        let b = (self.b as f32) / 255.0;
-
-        [r, g, b]
-    }
-
     pub fn r(self) -> i32 {
         self.r as i32
     }

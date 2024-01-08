@@ -10,9 +10,9 @@ pub enum Interrupt {
     Tmr1,
     Tmr2,
     Controller,
-    Sio,
+    // Sio,
     Spu,
-    Pio,
+    // Pio,
 }
 
 impl Interrupt {
@@ -28,9 +28,9 @@ impl Interrupt {
             Tmr1 => 0x20,
             Tmr2 => 0x40,
             Controller => 0x80,
-            Sio => 0x100,
+            // Sio => 0x100,
             Spu => 0x200,
-            Pio => 0x400,
+            // Pio => 0x400,
         }
     }
 }
