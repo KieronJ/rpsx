@@ -110,7 +110,7 @@ enum Device {
 }
 
 #[derive(Deserialize, Serialize)]
-pub struct Peripherals {
+pub struct Sio0 {
     controller: Controller,
     mem_card1: MemoryCard,
 
@@ -135,9 +135,9 @@ pub struct Peripherals {
     tx_fifo: Queue<u8>,
 }
 
-impl Peripherals {
-    pub fn new() -> Peripherals {
-        Peripherals {
+impl Sio0 {
+    pub fn new() -> Sio0 {
+        Sio0 {
             controller: Controller::new(),
             mem_card1: MemoryCard::new("./cards/card1.mcd"),
 
@@ -168,7 +168,7 @@ impl Peripherals {
     }
 
     pub fn reset_device_states(&mut self) {
-        //println!("[SIO] resetting device states");
+        // println!("[SIO] resetting device states");
         self.active_device = Device::None;
         self.in_transfer = false;
         self.in_acknowledge = false;
@@ -257,11 +257,16 @@ impl Peripherals {
     }
 
     pub fn rx_data(&mut self) -> u32 {
-        self.rx_fifo.pop() as u32
+        let data = self.rx_fifo.pop();
+        // println!("[SIO0] rx <- {:02X}", data);
+
+        data as u32
     }
 
     pub fn tx_data(&mut self, value: u32) {
         self.tx_fifo.push(value as u8);
+        // println!("[SIO0] tx -> {:02X}", value as u8);
+
         self.tx_ready_1 = true;
         self.tx_ready_2 = false;
 

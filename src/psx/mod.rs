@@ -6,9 +6,9 @@ mod exp2;
 mod gpu;
 mod intc;
 mod mdec;
-mod peripherals;
 pub mod rasteriser;
 mod scheduler;
+mod sio0;
 mod spu;
 mod timekeeper;
 mod timers;
@@ -21,8 +21,8 @@ use serde::{Deserialize, Serialize};
 use crate::util;
 
 use self::bus::Bus;
-use self::peripherals::controller::Controller;
 use self::cpu::R3000A;
+use self::sio0::controller::Controller;
 use self::timekeeper::Timekeeper;
 
 #[derive(Deserialize, Serialize)]
@@ -62,7 +62,7 @@ impl System {
 
     pub fn reload_host_files(&mut self) {
         self.bus.cdrom().load_disc(&self.game_filepath);
-        self.bus.peripherals().load_memcards();
+        self.bus.sio0().load_memcards();
     }
 
     pub fn run_frame(&mut self) {
@@ -74,7 +74,7 @@ impl System {
             self.timekeeper.sync_all(&mut self.bus);
         }
 
-        self.bus.peripherals().sync();
+        self.bus.sio0().sync();
     }
 
     pub fn load_psexe(&mut self, filename: String) -> io::Result<()> {
@@ -111,7 +111,7 @@ impl System {
     }
 
     pub fn get_controller(&mut self) -> &mut Controller {
-        self.bus.peripherals().controller()
+        self.bus.sio0().controller()
     }
 
     pub fn get_disc_id(&mut self) -> String {
