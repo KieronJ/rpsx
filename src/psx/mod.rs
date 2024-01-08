@@ -7,7 +7,6 @@ mod gpu;
 mod intc;
 mod mdec;
 pub mod rasteriser;
-mod scheduler;
 mod sio0;
 mod spu;
 mod timekeeper;
@@ -77,6 +76,7 @@ impl System {
         self.bus.sio0().sync();
     }
 
+    #[allow(dead_code)]
     pub fn load_psexe(&mut self, filename: String) -> io::Result<()> {
         let mut file = File::open(filename)?;
 
@@ -122,10 +122,7 @@ impl System {
         self.bus.cdrom().get_disc_id_raw()
     }
 
-    pub fn get_24bit(&self) -> bool {
-        self.bus.gpu().get_24bit()
-    }
-
+    #[allow(dead_code)]
     pub fn get_display_origin(&self) -> (u32, u32) {
         self.bus.gpu().get_display_origin()
     }
@@ -140,6 +137,7 @@ impl System {
         self.bus.gpu().get_framebuffer(data, draw_full_vram)
     }
 
+    #[allow(dead_code)]
     pub fn dump_vram(&self) {
         self.bus.gpu().dump_vram();
     }

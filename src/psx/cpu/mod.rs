@@ -105,24 +105,6 @@ impl R3000A {
         }
     }
 
-    pub fn get_address(&self) -> u64 {
-        self as *const _ as u64
-    }
-
-    pub fn get_regs_offset(&self) -> u32 {
-        let base = self.get_address();
-        let reg = &self.regs as *const _ as u64;
-
-        (reg - base) as u32
-    }
-
-    pub fn get_pc_offset(&self) -> u32 {
-        let base = self.get_address();
-        let pc = &self.pc as *const _ as u64;
-
-        (pc - base) as u32
-    }
-
     pub fn reset(&mut self) {
         self.pc = 0xbfc0_0000;
         self.new_pc = self.pc.wrapping_add(4);

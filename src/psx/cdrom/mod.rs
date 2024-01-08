@@ -199,6 +199,7 @@ enum CdromSectorMode {
     Ignore,
 }
 
+#[allow(dead_code)]
 static COMMAND_NAMES: [&'static str; 32] = [
     "CdlSync",
     "CdlNop",
@@ -1329,6 +1330,8 @@ impl Cdrom {
             ),
         };
 
+        //println!("[CDC] R {:08X} {:02X}", address, value);
+
         value
     }
 
@@ -1374,6 +1377,8 @@ impl Cdrom {
 
     pub fn write(&mut self, address: u32, value: u8) {
         use self::CdromIndex::*;
+
+        //println!("[CDC] W {:08X} {:02X}", address, value);
 
         match address & 0x3 {
             0 => {
