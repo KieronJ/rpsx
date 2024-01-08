@@ -1328,16 +1328,12 @@ impl R3000A {
     }
 
     fn reg(&self, index: usize) -> u32 {
-        unsafe {
-            *self.regs.get_unchecked(index)
-        }
+        self.regs[index]
     }
 
     fn set_reg(&mut self, index: usize, value: u32) {
-        unsafe {
-            *self.regs.get_unchecked_mut(index) = value;
-            *self.regs.get_unchecked_mut(0) = 0;
-        }
+        self.regs[index] = value;
+        self.regs[0] = 0;
     }
 
     fn branch(&mut self, offset: u32) {
@@ -1422,19 +1418,19 @@ impl R3000A {
             let line = ((pc & 0xff0) >> 4) as usize;
             let index = ((pc & 0xc) >> 2) as usize;
 
-            let cline = unsafe { self.icache.lines.get_unchecked_mut(line) };
+            let cline = &mut self.icache.lines[line];
 
             if (cline.tag != tag) || (cline.valid > index) {
                 let mut address = (physical_address & !0xf) + (0x4 * index as u32);
 
                 for i in index..4 {
-                    let data = unsafe { bus.load(tk, BusWidth::WORD, address) };
+                    let data = bus.load(tk, BusWidth::WORD, address);
 
                     if data.1 {
                         return (0, true);
                     }
 
-                    unsafe { *cline.data.get_unchecked_mut(i) = data.0 };
+                    cline.data[i] = data.0;
                     address += 4;
                 }
 
@@ -1444,11 +1440,11 @@ impl R3000A {
                 tk.tick(5);
             }
 
-            return (unsafe { *cline.data.get_unchecked(index) }, false);
+            return (cline.data[index], false);
         }
 
         tk.tick(5);
-        unsafe { bus.load(tk, BusWidth::WORD, physical_address) }
+        bus.load(tk, BusWidth::WORD, physical_address)
     }
 
     pub fn translate_address(virtual_address: u32) -> u32 {
@@ -1479,12 +1475,12 @@ impl R3000A {
             let line = ((address & 0xff0) >> 4) as usize;
             let index = ((address & 0xc) >> 2) as usize;
 
-            let cline = unsafe { self.icache.lines.get_unchecked(line) };
+            let cline = &self.icache.lines[line];
 
             if self.icache_tag_test() {
                 return (cline.tag, false);
             } else {
-                return (unsafe { *cline.data.get_unchecked(index) }, false);
+                return (cline.data[index], false);
             }
         }
 
@@ -1493,7 +1489,7 @@ impl R3000A {
         match physical_address {
             0x1f80_1080..=0x1f80_10ff => (self.dmac.read(address), false),
             0xfffe_0130 => (self.cache_control, false),
-            _ => unsafe { bus.load(tk, width, physical_address) },
+            _ => bus.load(tk, width, physical_address),
         }
     }
 
@@ -1534,12 +1530,12 @@ impl R3000A {
 
             let tag_test = self.icache_tag_test();
 
-            let cline = unsafe { self.icache.lines.get_unchecked_mut(line) };
+            let cline = &mut self.icache.lines[line];
 
             if tag_test {
                 cline.tag = value;
             } else {
-                unsafe { *cline.data.get_unchecked_mut(index) = value };
+                cline.data[index] = value;
             }
 
             cline.valid = 4;
@@ -1558,7 +1554,7 @@ impl R3000A {
                 self.cache_control = value;
                 false
             },
-            _ => unsafe { bus.store(tk, width, physical_address, value) },
+            _ => bus.store(tk, width, physical_address, value),
         }
     }
 
